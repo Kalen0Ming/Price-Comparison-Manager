@@ -145,7 +145,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = getCurrentUser();
   const style = {
     "--sidebar-width": "16rem",
-    "--sidebar-background": "222 47% 11%",
+    "--sidebar": "222 47% 11%",
     "--sidebar-foreground": "210 40% 98%",
     "--sidebar-border": "217 33% 17%",
     "--sidebar-accent": "217 33% 17%",
