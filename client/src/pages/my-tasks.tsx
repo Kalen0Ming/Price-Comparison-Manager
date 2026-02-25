@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentUser } from "@/hooks/use-auth";
-import { ClipboardList, ChevronRight, Clock, CheckCircle, AlertCircle } from "lucide-react";
-import { format } from "date-fns";
-import type { Task, Experiment } from "@shared/schema";
+import { ClipboardList, ChevronRight, Clock, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
+import { format, differenceInHours, differenceInDays } from "date-fns";
+import type { Task, Experiment, AnnotationTemplate, DisplayField } from "@shared/schema";
 
-type TaskWithExperiment = Task & { experiment: Experiment | null };
+type TaskWithExperiment = Task & { experiment: Experiment | null; template: AnnotationTemplate | null };
 
 function TaskStatusBadge({ status }: { status: string }) {
   const config: Record<string, { label: string; className: string }> = {
@@ -18,12 +18,88 @@ function TaskStatusBadge({ status }: { status: string }) {
     assigned: { label: "待标注", className: "bg-amber-100 text-amber-700" },
     annotated: { label: "已完成", className: "bg-green-100 text-green-700" },
     needs_review: { label: "需复核", className: "bg-red-100 text-red-700" },
+    completed: { label: "已归档", className: "bg-slate-100 text-slate-600" },
   };
   const c = config[status] || { label: status, className: "bg-muted text-muted-foreground" };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${c.className}`}>
       {c.label}
     </span>
+  );
+}
+
+function DeadlineBadge({ deadline }: { deadline: string | Date | null | undefined }) {
+  if (!deadline) return null;
+  const d = new Date(deadline);
+  const hoursLeft = differenceInHours(d, new Date());
+  const daysLeft = differenceInDays(d, new Date());
+
+  if (hoursLeft < 0) {
+    return (
+      <span className="text-xs text-red-600 font-semibold flex items-center gap-1" data-testid="badge-deadline-overdue">
+        <AlertTriangle className="w-3 h-3" />已逾期 {format(d, "MM-dd HH:mm")}
+      </span>
+    );
+  }
+  if (hoursLeft < 24) {
+    return (
+      <span className="text-xs text-red-500 font-medium flex items-center gap-1" data-testid="badge-deadline-urgent">
+        <AlertCircle className="w-3 h-3" />紧急·剩余 {hoursLeft} 小时
+      </span>
+    );
+  }
+  if (daysLeft < 3) {
+    return (
+      <span className="text-xs text-amber-600 font-medium flex items-center gap-1" data-testid="badge-deadline-soon">
+        <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}（剩 {daysLeft} 天）
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-muted-foreground flex items-center gap-1" data-testid="badge-deadline-normal">
+      <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}
+    </span>
+  );
+}
+
+function TaskPreview({ task }: { task: TaskWithExperiment }) {
+  const data = task.originalData as Record<string, unknown>;
+  const displayFields = task.template
+    ? (task.template.displayFields as DisplayField[]).slice(0, 3)
+    : null;
+
+  if (displayFields && displayFields.length > 0) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-1 mt-1">
+        {displayFields.map((f) => {
+          const val = data[f.key];
+          const str = val ? String(val) : "—";
+          const isImg = /^https?:\/\/.+\.(jpe?g|png|gif|webp|bmp)(\?.*)?$/i.test(str);
+          return (
+            <div key={f.key} className="min-w-0">
+              <p className="text-xs text-muted-foreground">{f.label}</p>
+              {isImg ? (
+                <img src={str} alt={f.label} className="h-10 w-auto object-contain rounded mt-0.5 border border-border" loading="lazy" />
+              ) : (
+                <p className="text-sm font-medium truncate" data-testid={`text-field-${f.key}`}>{str}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const entries = Object.entries(data).slice(0, 3);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-1 mt-1">
+      {entries.map(([k, v]) => (
+        <div key={k} className="min-w-0">
+          <p className="text-xs text-muted-foreground">{k}</p>
+          <p className="text-sm font-medium truncate">{String(v ?? "—")}</p>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -41,8 +117,8 @@ export default function MyTasks() {
     enabled: !!user,
   });
 
-  const pendingTasks = tasks.filter(t => t.status !== "annotated");
-  const completedTasks = tasks.filter(t => t.status === "annotated");
+  const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "assigned" || t.status === "needs_review");
+  const completedTasks = tasks.filter(t => t.status === "annotated" || t.status === "completed");
 
   return (
     <DashboardLayout>
@@ -56,7 +132,6 @@ export default function MyTasks() {
         </p>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
           { label: "待完成", value: pendingTasks.length, icon: AlertCircle, color: "text-amber-500" },
@@ -75,11 +150,10 @@ export default function MyTasks() {
         ))}
       </div>
 
-      {/* Task List */}
       <div className="space-y-3">
         <h2 className="text-lg font-semibold text-foreground mb-4">待完成任务</h2>
         {isLoading ? (
-          [...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)
+          [...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 w-full" />)
         ) : pendingTasks.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">
@@ -89,96 +163,74 @@ export default function MyTasks() {
             </CardContent>
           </Card>
         ) : (
-          pendingTasks.map((task) => {
-            const data = task.originalData as Record<string, unknown>;
-            const productA = data.productA_name || data.product_a_name || Object.values(data)[0];
-            const productB = data.productB_name || data.product_b_name || Object.values(data)[1];
-            const deadline = task.experiment?.deadline;
-
-            return (
-              <Card
-                key={task.id}
-                className="cursor-pointer hover-elevate transition-shadow"
-                onClick={() => setLocation(`/annotation/${task.id}`)}
-                data-testid={`card-task-${task.id}`}
-              >
-                <CardContent className="p-5">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <TaskStatusBadge status={task.status} />
-                        {task.experiment && (
-                          <Badge variant="outline" className="text-xs">
-                            {task.experiment.name}
-                          </Badge>
-                        )}
-                        {deadline && (
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            截止 {format(new Date(deadline), "MM-dd HH:mm")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="min-w-0">
-                          <p className="text-xs text-muted-foreground mb-0.5">商品 A</p>
-                          <p className="text-sm font-medium truncate">{String(productA || "—")}</p>
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs text-muted-foreground mb-0.5">商品 B</p>
-                          <p className="text-sm font-medium truncate">{String(productB || "—")}</p>
-                        </div>
-                      </div>
+          pendingTasks.map((task) => (
+            <Card
+              key={task.id}
+              className="cursor-pointer hover-elevate transition-shadow"
+              onClick={() => setLocation(`/annotation/${task.id}`)}
+              data-testid={`card-task-${task.id}`}
+            >
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <TaskStatusBadge status={task.status} />
+                      {task.experiment && (
+                        <Badge variant="outline" className="text-xs">
+                          {task.experiment.name}
+                        </Badge>
+                      )}
+                      {task.template && (
+                        <span className="text-xs text-muted-foreground">模板：{task.template.name}</span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button size="sm" className="gap-1.5" data-testid={`button-annotate-${task.id}`}>
-                        开始标注
-                        <ChevronRight className="w-4 h-4" />
-                      </Button>
-                    </div>
+                    <TaskPreview task={task} />
+                    {task.experiment?.deadline && (
+                      <div className="mt-2">
+                        <DeadlineBadge deadline={task.experiment.deadline} />
+                      </div>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })
+                  <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+                    <Button size="sm" className="gap-1.5" data-testid={`button-annotate-${task.id}`}>
+                      开始标注
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))
         )}
 
         {completedTasks.length > 0 && (
           <>
             <h2 className="text-lg font-semibold text-foreground mb-4 mt-8">已完成任务</h2>
-            {completedTasks.map((task) => {
-              const data = task.originalData as Record<string, unknown>;
-              const productA = data.productA_name || data.product_a_name || Object.values(data)[0];
-              const productB = data.productB_name || data.product_b_name || Object.values(data)[1];
-              return (
-                <Card key={task.id} className="opacity-70" data-testid={`card-done-task-${task.id}`}>
-                  <CardContent className="p-5">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <TaskStatusBadge status={task.status} />
-                          {task.experiment && (
-                            <Badge variant="outline" className="text-xs">{task.experiment.name}</Badge>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div><p className="text-xs text-muted-foreground">商品 A</p><p className="text-sm truncate">{String(productA || "—")}</p></div>
-                          <div><p className="text-xs text-muted-foreground">商品 B</p><p className="text-sm truncate">{String(productB || "—")}</p></div>
-                        </div>
+            {completedTasks.map((task) => (
+              <Card key={task.id} className="opacity-70" data-testid={`card-done-task-${task.id}`}>
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <TaskStatusBadge status={task.status} />
+                        {task.experiment && (
+                          <Badge variant="outline" className="text-xs">{task.experiment.name}</Badge>
+                        )}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setLocation(`/annotation/${task.id}`)}
-                        data-testid={`button-view-annotation-${task.id}`}
-                      >
-                        查看结果
-                      </Button>
+                      <TaskPreview task={task} />
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setLocation(`/annotation/${task.id}`)}
+                      data-testid={`button-view-annotation-${task.id}`}
+                    >
+                      查看结果
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </>
         )}
       </div>

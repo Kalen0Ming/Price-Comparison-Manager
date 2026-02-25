@@ -12,9 +12,109 @@ import { useToast } from "@/hooks/use-toast";
 import { getCurrentUser } from "@/hooks/use-auth";
 import {
   ArrowLeft, Save, CheckCircle, Tag, ShoppingCart,
-  ArrowUpDown, Equal, ArrowUp, ArrowDown, AlertCircle,
+  ArrowUpDown, Equal, ArrowUp, ArrowDown, AlertCircle, ExternalLink, X, ZoomIn,
 } from "lucide-react";
 import type { Task, Experiment, Annotation, AnnotationTemplate, AnnotationField, DisplayField } from "@shared/schema";
+
+const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|bmp|avif)(\?.*)?$/i;
+const IMAGE_CDN = /^https?:\/\/[^/]*(alicdn\.com|img\.alicdn|gw\.alicdn|img\d+\.alicdn|img-s-msn|picasso|sinaimg\.cn|qpic\.cn|bdimg\.com|mmbiz\.qpic|cdn\.shopify|imgur\.com|i\.imgur)/i;
+
+function isUrl(val: string): boolean {
+  return /^https?:\/\//i.test(val);
+}
+
+function isImageUrl(val: string): boolean {
+  if (!isUrl(val)) return false;
+  if (IMAGE_EXTS.test(val.split("?")[0])) return true;
+  return IMAGE_CDN.test(val);
+}
+
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+      data-testid="lightbox-overlay"
+    >
+      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 text-white/80 hover:text-white transition-colors"
+          data-testid="button-close-lightbox"
+        >
+          <X className="w-7 h-7" />
+        </button>
+        <img
+          src={src}
+          alt="放大图片"
+          className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+        />
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-2 right-2 text-xs text-white/60 hover:text-white flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink className="w-3 h-3" />在新标签打开
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function SmartValue({ value }: { value: unknown }) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const str = String(value ?? "");
+  if (!str || str === "—") return <span className="font-medium text-muted-foreground">—</span>;
+
+  if (isImageUrl(str)) {
+    return (
+      <>
+        {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+        <div className="flex flex-col gap-1.5">
+          <div
+            className="relative group inline-block cursor-zoom-in"
+            onClick={() => setLightboxSrc(str)}
+            data-testid="img-field-thumb"
+          >
+            <img
+              src={str}
+              alt=""
+              className="max-h-36 max-w-full rounded-md border border-border object-contain bg-muted/30 transition-opacity group-hover:opacity-90"
+              loading="lazy"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <ZoomIn className="w-6 h-6 text-white drop-shadow-md" />
+            </div>
+          </div>
+          <a href={str} target="_blank" rel="noopener noreferrer" className="text-xs text-primary underline break-all flex items-center gap-1">
+            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate max-w-48">{str}</span>
+          </a>
+        </div>
+      </>
+    );
+  }
+
+  if (isUrl(str)) {
+    return (
+      <a
+        href={str}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-medium text-primary underline underline-offset-2 hover:opacity-80 transition-opacity break-all flex items-start gap-1"
+        data-testid="link-field-url"
+      >
+        <ExternalLink className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+        <span>{str}</span>
+      </a>
+    );
+  }
+
+  return <span className="font-medium text-foreground break-all">{str}</span>;
+}
 
 type TaskDetail = Task & {
   experiment: Experiment | null;
@@ -57,21 +157,21 @@ function DataDisplayCard({ data, displayFields }: { data: Record<string, unknown
             源数据
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           {displayFields.map((f) => (
             <div key={f.key} className="flex items-start gap-2 text-sm">
-              <span className="text-muted-foreground min-w-24 shrink-0">{f.label}：</span>
-              <span className="font-medium text-foreground break-all">{String(data[f.key] ?? "—")}</span>
+              <span className="text-muted-foreground min-w-24 shrink-0 mt-0.5">{f.label}：</span>
+              <SmartValue value={data[f.key] ?? "—"} />
             </div>
           ))}
           {Object.entries(data).filter(([k]) => !displayFields.some(f => f.key === k)).length > 0 && (
             <details className="mt-2">
               <summary className="text-xs text-muted-foreground cursor-pointer select-none">查看其他字段</summary>
-              <div className="mt-2 space-y-1">
+              <div className="mt-2 space-y-2">
                 {Object.entries(data).filter(([k]) => !displayFields.some(f => f.key === k)).map(([k, v]) => (
                   <div key={k} className="flex gap-2 text-xs">
                     <span className="text-muted-foreground font-mono shrink-0">{k}：</span>
-                    <span className="break-all">{String(v)}</span>
+                    <SmartValue value={v} />
                   </div>
                 ))}
               </div>
@@ -98,11 +198,11 @@ function DataDisplayCard({ data, displayFields }: { data: Record<string, unknown
       <CardHeader className="pb-3">
         <CardTitle className="text-base">源数据</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-1">
+      <CardContent className="space-y-3">
         {Object.entries(data).map(([k, v]) => (
           <div key={k} className="flex gap-2 text-sm">
-            <span className="text-muted-foreground font-mono shrink-0 min-w-24">{k}：</span>
-            <span className="font-medium break-all">{String(v ?? "—")}</span>
+            <span className="text-muted-foreground font-mono shrink-0 min-w-24 mt-0.5">{k}：</span>
+            <SmartValue value={v ?? "—"} />
           </div>
         ))}
       </CardContent>
@@ -145,10 +245,10 @@ function ProductCard({ label, data, side }: { label: string; data: Record<string
         {otherFields.map(([key, val]) => (
           <div key={key}>
             <p className="text-xs text-muted-foreground mb-0.5">{key.replace(new RegExp(`product${side}_`, "i"), "")}</p>
-            <p className="text-sm text-foreground">{String(val)}</p>
+            <SmartValue value={val} />
           </div>
         ))}
-        {url && url !== "—" && <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary underline break-all">查看链接</a>}
+        {url && url !== "—" && <SmartValue value={url} />}
       </CardContent>
     </Card>
   );

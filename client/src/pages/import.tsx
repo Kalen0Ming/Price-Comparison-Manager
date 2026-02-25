@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, FileSpreadsheet, ArrowRight, CheckCircle, ChevronRight, RotateCcw, Info } from "lucide-react";
+import { Upload, FileSpreadsheet, ArrowRight, CheckCircle, ChevronRight, RotateCcw, Info, Loader2 } from "lucide-react";
 import type { Experiment, AnnotationTemplate, DisplayField } from "@shared/schema";
 
 type Step = "upload" | "map" | "done";
@@ -16,6 +16,7 @@ interface ParseResult {
   columns: string[];
   preview: Record<string, string>[];
   totalRows: number;
+  uploadId: string;
 }
 
 export default function ImportPage() {
@@ -26,10 +27,10 @@ export default function ImportPage() {
   const [step, setStep] = useState<Step>("upload");
   const [selectedExperimentId, setSelectedExperimentId] = useState<string>("");
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
-  const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [isDragging, setIsDragging] = useState(false);
   const [createdCount, setCreatedCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
 
   const { data: experiments = [] } = useQuery<Experiment[]>({ queryKey: ["/api/experiments"] });
   const { data: templates = [] } = useQuery<AnnotationTemplate[]>({ queryKey: ["/api/templates"] });
@@ -44,16 +45,20 @@ export default function ImportPage() {
 
   const createTasksMutation = useMutation({
     mutationFn: async () => {
+      if (!parseResult?.uploadId) throw new Error("请重新上传文件");
       const res = await fetch("/api/import/create-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           experimentId: Number(selectedExperimentId),
-          rows: rawRows,
+          uploadId: parseResult.uploadId,
           mapping: displayFields.length > 0 ? mapping : {},
         }),
       });
-      if (!res.ok) throw new Error("创建任务失败");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "创建任务失败");
+      }
       return res.json() as Promise<{ created: number }>;
     },
     onSuccess: (data) => {
@@ -68,34 +73,28 @@ export default function ImportPage() {
   });
 
   const handleFileSelect = async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch("/api/import/upload", { method: "POST", body: formData });
-    if (!res.ok) { toast({ variant: "destructive", title: "上传失败" }); return; }
-    const data = await res.json();
-    setParseResult(data);
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/import/upload", { method: "POST", body: formData });
+      if (!res.ok) { toast({ variant: "destructive", title: "上传失败" }); return; }
+      const data: ParseResult = await res.json();
+      setParseResult(data);
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const XLSX = await import("xlsx");
-      const wb = XLSX.read(e.target?.result, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      setRawRows(rows);
-    };
-    reader.readAsArrayBuffer(file);
+      if (displayFields.length > 0 && data.columns) {
+        const autoMap: Record<string, string> = {};
+        displayFields.forEach(f => {
+          if (data.columns.includes(f.key)) autoMap[f.key] = f.key;
+          else if (data.columns.includes(f.label)) autoMap[f.key] = f.label;
+        });
+        setMapping(autoMap);
+      }
 
-    // Auto-map if template display fields match column names
-    if (displayFields.length > 0 && data.columns) {
-      const autoMap: Record<string, string> = {};
-      displayFields.forEach(f => {
-        if (data.columns.includes(f.key)) autoMap[f.key] = f.key;
-        else if (data.columns.includes(f.label)) autoMap[f.key] = f.label;
-      });
-      setMapping(autoMap);
+      setStep("map");
+    } finally {
+      setIsUploading(false);
     }
-
-    setStep("map");
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -108,7 +107,6 @@ export default function ImportPage() {
   const reset = () => {
     setStep("upload");
     setParseResult(null);
-    setRawRows([]);
     setMapping({});
     setSelectedExperimentId("");
     setCreatedCount(0);
@@ -192,17 +190,32 @@ export default function ImportPage() {
             <CardContent>
               <div
                 className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors cursor-pointer ${
-                  isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+                  isDragging ? "border-primary bg-primary/5" :
+                  isUploading ? "border-primary/50 bg-primary/5 cursor-default" :
+                  "border-border hover:border-primary/50 hover:bg-muted/30"
                 }`}
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); if (!isUploading) setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => selectedExperimentId ? fileInputRef.current?.click() : toast({ variant: "destructive", title: "请先选择实验" })}
+                onDrop={isUploading ? undefined : handleDrop}
+                onClick={() => {
+                  if (isUploading) return;
+                  selectedExperimentId ? fileInputRef.current?.click() : toast({ variant: "destructive", title: "请先选择实验" });
+                }}
                 data-testid="dropzone-upload"
               >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-12 h-12 mx-auto mb-4 text-primary animate-spin" />
+                    <p className="text-sm font-medium text-foreground mb-1">正在上传并解析文件...</p>
+                    <p className="text-xs text-muted-foreground">文件已上传至服务器，正在解析中</p>
+                  </>
+                ) : (
+                  <>
                 <FileSpreadsheet className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-sm font-medium text-foreground mb-1">拖放文件到此处，或点击选择文件</p>
                 <p className="text-xs text-muted-foreground">CSV / Excel (.xlsx, .xls)，无格式限制</p>
+                  </>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"

@@ -3,11 +3,21 @@ import type { Server } from "http";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import archiver from "archiver";
+import { randomUUID } from "crypto";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+const uploadRowCache = new Map<string, { rows: Record<string, unknown>[]; ts: number }>();
+const UPLOAD_TTL = 30 * 60 * 1000;
+function cleanUploadCache() {
+  const now = Date.now();
+  for (const [k, v] of uploadRowCache.entries()) {
+    if (now - v.ts > UPLOAD_TTL) uploadRowCache.delete(k);
+  }
+}
 
 // Trigger review for a task based on experiment settings
 async function triggerReviewCheck(taskId: number, experimentId: number) {
@@ -391,11 +401,22 @@ export async function registerRoutes(
       const myTasks = await storage.getMyTasks(userId);
       const expIds = Array.from(new Set(myTasks.map(t => t.experimentId)));
       const expMap: Record<number, any> = {};
+      const templateMap: Record<number, any> = {};
       for (const eid of expIds) {
         const exp = await storage.getExperiment(eid);
-        if (exp) expMap[eid] = exp;
+        if (exp) {
+          expMap[eid] = exp;
+          if (exp.templateId && !templateMap[exp.templateId]) {
+            const tmpl = await storage.getTemplate(exp.templateId);
+            if (tmpl) templateMap[exp.templateId] = tmpl;
+          }
+        }
       }
-      const enriched = myTasks.map(t => ({ ...t, experiment: expMap[t.experimentId] || null }));
+      const enriched = myTasks.map(t => {
+        const exp = expMap[t.experimentId] || null;
+        const template = exp?.templateId ? (templateMap[exp.templateId] || null) : null;
+        return { ...t, experiment: exp, template };
+      });
       res.json(enriched);
     } catch {
       res.status(400).json({ message: "Invalid userId" });
@@ -509,9 +530,12 @@ export async function registerRoutes(
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
       const wb = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows: Record<string, string>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       if (rows.length === 0) return res.status(400).json({ message: "File is empty" });
-      res.json({ columns: Object.keys(rows[0]), preview: rows.slice(0, 5), totalRows: rows.length });
+      const uploadId = randomUUID();
+      uploadRowCache.set(uploadId, { rows, ts: Date.now() });
+      cleanUploadCache();
+      res.json({ columns: Object.keys(rows[0]), preview: rows.slice(0, 5), totalRows: rows.length, uploadId });
     } catch {
       res.status(500).json({ message: "Failed to parse file" });
     }
@@ -519,7 +543,15 @@ export async function registerRoutes(
 
   app.post(api.import.create.path, async (req, res) => {
     try {
-      const { experimentId, rows, mapping } = api.import.create.input.parse(req.body);
+      const body = z.object({
+        experimentId: z.number(),
+        uploadId: z.string(),
+        mapping: z.record(z.string()),
+      }).parse(req.body);
+      const cached = uploadRowCache.get(body.uploadId);
+      if (!cached) return res.status(400).json({ message: "上传已过期，请重新上传文件" });
+      const rows = cached.rows;
+      const mapping = body.mapping;
       const taskList = rows.map((row) => {
         const originalData: Record<string, unknown> = {};
         for (const [targetField, sourceCol] of Object.entries(mapping)) {
@@ -528,11 +560,12 @@ export async function registerRoutes(
         for (const [col, val] of Object.entries(row)) {
           if (!Object.values(mapping).includes(col)) originalData[col] = val;
         }
-        return { experimentId, originalData, status: "pending" as const };
+        return { experimentId: body.experimentId, originalData, status: "pending" as const };
       });
       const created = await storage.bulkCreateTasks(taskList);
+      uploadRowCache.delete(body.uploadId);
       res.json({ created });
-    } catch {
+    } catch (e) {
       res.status(400).json({ message: "Failed to create tasks" });
     }
   });
