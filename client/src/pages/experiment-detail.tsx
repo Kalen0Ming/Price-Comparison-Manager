@@ -1,14 +1,19 @@
+import { useState } from "react";
 import { useParams, Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, Database } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, Database, UserPlus, Shuffle, Users } from "lucide-react";
 import { format } from "date-fns";
-import type { Experiment, ExperimentStats } from "@shared/schema";
+import type { Experiment, ExperimentStats, User, Task } from "@shared/schema";
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -26,11 +31,12 @@ function StatusBadge({ status }: { status: string }) {
 
 function TaskStatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    pending: "bg-amber-100 text-amber-700",
+    pending: "bg-slate-100 text-slate-700",
+    assigned: "bg-amber-100 text-amber-700",
     annotated: "bg-green-100 text-green-700",
     needs_review: "bg-red-100 text-red-700",
   };
-  const labels: Record<string, string> = { pending: "待标注", annotated: "已标注", needs_review: "需复核" };
+  const labels: Record<string, string> = { pending: "待分配", assigned: "待标注", annotated: "已标注", needs_review: "需复核" };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || "bg-muted"}`}>
       {labels[status] || status}
@@ -50,9 +56,197 @@ function MiniBar({ value, max, color }: { value: number; max: number; color: str
   );
 }
 
+// Manual assignment dialog
+function ManualAssignDialog({ expId, tasks, users }: { expId: number; tasks: Task[]; users: User[] }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<string>("");
+  const [count, setCount] = useState(5);
+
+  const unassignedTasks = tasks.filter(t => !t.assignedTo && t.status !== "annotated");
+
+  const assignMutation = useMutation({
+    mutationFn: async () => {
+      const taskIds = unassignedTasks.slice(0, count).map(t => t.id);
+      const res = await fetch(`/api/experiments/${expId}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: Number(selectedUser), taskIds }),
+      });
+      if (!res.ok) throw new Error("分配失败");
+      return res.json() as Promise<{ assigned: number }>;
+    },
+    onSuccess: (data) => {
+      const user = users.find(u => u.id === Number(selectedUser));
+      toast({ title: "分配成功", description: `已为「${user?.username}」分配 ${data.assigned} 个任务。` });
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      setOpen(false);
+    },
+    onError: () => toast({ variant: "destructive", title: "分配失败" }),
+  });
+
+  const annotators = users.filter(u => u.role === "annotator" || u.role === "reviewer");
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="gap-2" data-testid="button-manual-assign">
+          <UserPlus className="w-4 h-4" />
+          手动分配
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>手动分配任务</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-muted-foreground">
+            当前有 <span className="font-semibold text-foreground">{unassignedTasks.length}</span> 个未分配任务。
+          </p>
+          <div className="space-y-1.5">
+            <Label>选择标注员</Label>
+            <Select value={selectedUser} onValueChange={setSelectedUser}>
+              <SelectTrigger data-testid="select-assign-user">
+                <SelectValue placeholder="请选择标注员..." />
+              </SelectTrigger>
+              <SelectContent>
+                {annotators.map(u => (
+                  <SelectItem key={u.id} value={String(u.id)}>
+                    {u.username} ({u.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>分配数量（最多 {unassignedTasks.length} 个）</Label>
+            <Input
+              type="number"
+              min={1}
+              max={unassignedTasks.length}
+              value={count}
+              onChange={e => setCount(Number(e.target.value))}
+              data-testid="input-assign-count"
+            />
+          </div>
+          <Button
+            className="w-full"
+            disabled={!selectedUser || count < 1 || assignMutation.isPending}
+            onClick={() => assignMutation.mutate()}
+            data-testid="button-confirm-assign"
+          >
+            {assignMutation.isPending ? "分配中..." : `确认分配 ${Math.min(count, unassignedTasks.length)} 个任务`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Random assignment dialog
+function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Task[]; users: User[] }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
+
+  const annotators = users.filter(u => u.role === "annotator" || u.role === "reviewer");
+  const unassignedTasks = tasks.filter(t => !t.assignedTo && t.status !== "annotated");
+
+  const randomMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/experiments/${expId}/assign-random`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userIds: selectedUsers }),
+      });
+      if (!res.ok) throw new Error("分配失败");
+      return res.json() as Promise<{ assigned: number; distribution: Record<number, number> }>;
+    },
+    onSuccess: (data) => {
+      const distStr = Object.entries(data.distribution)
+        .map(([uid, cnt]) => {
+          const u = users.find(u => u.id === Number(uid));
+          return `${u?.username || uid}: ${cnt} 个`;
+        })
+        .join("，");
+      toast({ title: `随机分配成功，共 ${data.assigned} 个任务`, description: distStr });
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      setOpen(false);
+    },
+    onError: () => toast({ variant: "destructive", title: "分配失败" }),
+  });
+
+  const toggleUser = (id: number) => {
+    setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="gap-2" data-testid="button-random-assign">
+          <Shuffle className="w-4 h-4" />
+          随机分配
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>随机均匀分配任务</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <p className="text-sm text-muted-foreground">
+            将 <span className="font-semibold text-foreground">{unassignedTasks.length}</span> 个未分配任务随机均匀地分配给所选标注员。
+          </p>
+          <div className="space-y-2">
+            <Label>选择参与的标注员（可多选）</Label>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {annotators.map(u => (
+                <div
+                  key={u.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedUsers.includes(u.id) ? "border-primary bg-primary/5" : "border-border"}`}
+                  onClick={() => toggleUser(u.id)}
+                  data-testid={`option-user-${u.id}`}
+                >
+                  <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${selectedUsers.includes(u.id) ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+                    {selectedUsers.includes(u.id) && <CheckCircle className="w-3 h-3" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{u.username}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{u.role}</p>
+                  </div>
+                  {selectedUsers.length > 0 && selectedUsers.includes(u.id) && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      ≈ {Math.ceil(unassignedTasks.length / selectedUsers.length)} 个
+                    </span>
+                  )}
+                </div>
+              ))}
+              {annotators.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">暂无标注员账号，请先在用户管理中创建。</p>
+              )}
+            </div>
+          </div>
+          <Button
+            className="w-full"
+            disabled={selectedUsers.length === 0 || randomMutation.isPending || unassignedTasks.length === 0}
+            onClick={() => randomMutation.mutate()}
+            data-testid="button-confirm-random-assign"
+          >
+            {randomMutation.isPending ? "分配中..." : `随机分配给 ${selectedUsers.length} 名标注员`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const expId = Number(id);
+  const queryClient = useQueryClient();
 
   const { data: experiment, isLoading: expLoading } = useQuery<Experiment>({
     queryKey: ["/api/experiments", expId],
@@ -67,6 +261,22 @@ export default function ExperimentDetail() {
     queryKey: ["/api/experiments", expId, "stats"],
     queryFn: async () => {
       const r = await fetch(`/api/experiments/${expId}/stats`);
+      return r.json();
+    },
+  });
+
+  const { data: allTasks = [] } = useQuery<Task[]>({
+    queryKey: ["/api/tasks", expId],
+    queryFn: async () => {
+      const r = await fetch(`/api/tasks?experimentId=${expId}`);
+      return r.json();
+    },
+  });
+
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+    queryFn: async () => {
+      const r = await fetch("/api/users");
       return r.json();
     },
   });
@@ -86,40 +296,50 @@ export default function ExperimentDetail() {
         {expLoading ? (
           <Skeleton className="h-9 w-64 mb-2" />
         ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-bold text-foreground">{experiment?.name}</h1>
-            {experiment && <StatusBadge status={experiment.status} />}
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-3xl font-bold text-foreground">{experiment?.name}</h1>
+                {experiment && <StatusBadge status={experiment.status} />}
+              </div>
+              {experiment?.description && (
+                <p className="text-muted-foreground mt-1">{experiment.description}</p>
+              )}
+              {experiment?.deadline && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  截止日期：{format(new Date(experiment.deadline), "yyyy-MM-dd HH:mm")}
+                </p>
+              )}
+            </div>
+            {/* Assignment Controls */}
+            <div className="flex gap-2 flex-wrap">
+              <ManualAssignDialog expId={expId} tasks={allTasks} users={users} />
+              <RandomAssignDialog expId={expId} tasks={allTasks} users={users} />
+            </div>
           </div>
-        )}
-        {experiment?.description && (
-          <p className="text-muted-foreground mt-1">{experiment.description}</p>
-        )}
-        {experiment?.deadline && (
-          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" />
-            截止日期：{format(new Date(experiment.deadline), "yyyy-MM-dd")}
-          </p>
         )}
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         {[
           { label: "总任务数", value: stats?.totalTasks, icon: Database, color: "text-primary" },
-          { label: "待标注", value: stats?.pendingTasks, icon: ClipboardList, color: "text-amber-500" },
+          { label: "待分配", value: stats?.pendingTasks, icon: ClipboardList, color: "text-slate-500" },
+          { label: "待标注", value: stats?.assignedTasks, icon: Users, color: "text-amber-500" },
           { label: "已标注", value: stats?.annotatedTasks, icon: CheckCircle, color: "text-green-500" },
           { label: "需复核", value: stats?.needsReviewTasks, icon: AlertCircle, color: "text-red-500" },
         ].map((stat) => (
           <Card key={stat.label}>
-            <CardContent className="p-5">
+            <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
+                <p className="text-xs text-muted-foreground">{stat.label}</p>
                 <stat.icon className={`w-4 h-4 ${stat.color}`} />
               </div>
               {isLoading ? (
-                <Skeleton className="h-8 w-16" />
+                <Skeleton className="h-8 w-12" />
               ) : (
-                <p className={`text-3xl font-bold ${stat.color}`}>{stat.value ?? 0}</p>
+                <p className={`text-2xl font-bold ${stat.color}`}>{stat.value ?? 0}</p>
               )}
             </CardContent>
           </Card>
@@ -154,8 +374,9 @@ export default function ExperimentDetail() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-12">#</TableHead>
+                      <TableHead className="w-10">#</TableHead>
                       <TableHead>状态</TableHead>
+                      <TableHead>分配给</TableHead>
                       <TableHead>数据字段</TableHead>
                       <TableHead>创建时间</TableHead>
                     </TableRow>
@@ -163,11 +384,20 @@ export default function ExperimentDetail() {
                   <TableBody>
                     {stats.sampleTasks.map((task, i) => {
                       const data = task.originalData as Record<string, unknown>;
-                      const fieldEntries = Object.entries(data).slice(0, 3);
+                      const fieldEntries = Object.entries(data).slice(0, 2);
+                      const assignedUser = task.assignedTo ? users.find(u => u.id === task.assignedTo) : null;
                       return (
                         <TableRow key={task.id} data-testid={`row-task-${task.id}`}>
                           <TableCell className="text-xs text-muted-foreground">{i + 1}</TableCell>
                           <TableCell><TaskStatusBadge status={task.status} /></TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {assignedUser ? (
+                              <span className="flex items-center gap-1">
+                                <Users className="w-3 h-3" />
+                                {assignedUser.username}
+                              </span>
+                            ) : "—"}
+                          </TableCell>
                           <TableCell>
                             <div className="space-y-0.5">
                               {fieldEntries.map(([k, v]) => (
@@ -176,8 +406,8 @@ export default function ExperimentDetail() {
                                   <span className="font-medium">{String(v)}</span>
                                 </p>
                               ))}
-                              {Object.keys(data).length > 3 && (
-                                <p className="text-xs text-muted-foreground">+{Object.keys(data).length - 3} 个字段</p>
+                              {Object.keys(data).length > 2 && (
+                                <p className="text-xs text-muted-foreground">+{Object.keys(data).length - 2} 个字段</p>
                               )}
                             </div>
                           </TableCell>

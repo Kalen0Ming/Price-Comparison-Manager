@@ -25,7 +25,9 @@ export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull(),
   originalData: json("original_data").notNull(),
-  status: text("status").notNull().default("pending"),
+  status: text("status").notNull().default("pending"), // pending, assigned, annotated, needs_review
+  assignedTo: integer("assigned_to"), // user id of the assigned annotator
+  assignedAt: timestamp("assigned_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -34,7 +36,18 @@ export const annotations = pgTable("annotations", {
   taskId: integer("task_id").notNull(),
   userId: integer("user_id").notNull(),
   result: json("result").notNull(),
-  type: text("type").notNull().default("initial"),
+  type: text("type").notNull().default("initial"), // initial, review, draft
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  type: text("type").notNull().default("info"), // info, warning, urgent
+  isRead: boolean("is_read").notNull().default(false),
+  experimentId: integer("experiment_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -51,13 +64,13 @@ export const apiConnectors = pgTable("api_connectors", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   url: text("url").notNull(),
-  authType: text("auth_type").notNull().default("api_key"), // api_key, bearer, none
+  authType: text("auth_type").notNull().default("api_key"),
   authValue: text("auth_value"),
-  fetchFrequency: text("fetch_frequency").notNull().default("manual"), // manual, daily
+  fetchFrequency: text("fetch_frequency").notNull().default("manual"),
   experimentId: integer("experiment_id"),
-  fieldMapping: json("field_mapping"), // maps API JSON fields to task originalData keys
+  fieldMapping: json("field_mapping"),
   lastFetchedAt: timestamp("last_fetched_at"),
-  status: text("status").notNull().default("active"), // active, paused
+  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -66,6 +79,7 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertExperimentSchema = createInsertSchema(experiments).omit({ id: true, createdAt: true });
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true });
 export const insertAnnotationSchema = createInsertSchema(annotations).omit({ id: true, createdAt: true });
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, createdAt: true });
 export const insertApiConnectorSchema = createInsertSchema(apiConnectors).omit({ id: true, createdAt: true, lastFetchedAt: true });
 
@@ -82,6 +96,9 @@ export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Annotation = typeof annotations.$inferSelect;
 export type InsertAnnotation = z.infer<typeof insertAnnotationSchema>;
 
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+
 export type Log = typeof logs.$inferSelect;
 export type InsertLog = z.infer<typeof insertLogSchema>;
 
@@ -96,6 +113,7 @@ export type UpdateApiConnectorRequest = Partial<InsertApiConnector>;
 export interface ExperimentStats {
   totalTasks: number;
   pendingTasks: number;
+  assignedTasks: number;
   annotatedTasks: number;
   needsReviewTasks: number;
   sampleTasks: Task[];
