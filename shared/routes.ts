@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { 
-  insertUserSchema, users, 
+import {
+  insertUserSchema, users,
   insertExperimentSchema, experiments,
   insertTaskSchema, tasks,
   insertAnnotationSchema, annotations,
-  insertLogSchema, logs
+  insertApiConnectorSchema, apiConnectors,
 } from "./schema";
 
 export const errorSchemas = {
@@ -46,6 +46,11 @@ export const api = {
       path: "/api/experiments/:id" as const,
       responses: { 200: z.custom<typeof experiments.$inferSelect>(), 404: errorSchemas.notFound }
     },
+    stats: {
+      method: "GET" as const,
+      path: "/api/experiments/:id/stats" as const,
+      responses: { 200: z.any() }
+    },
     create: {
       method: "POST" as const,
       path: "/api/experiments" as const,
@@ -78,7 +83,59 @@ export const api = {
     list: {
       method: "GET" as const,
       path: "/api/logs" as const,
-      responses: { 200: z.array(z.custom<typeof logs.$inferSelect>()) }
+      responses: { 200: z.array(z.custom<typeof apiConnectors.$inferSelect>()) }
+    }
+  },
+  import: {
+    upload: {
+      method: "POST" as const,
+      path: "/api/import/upload" as const,
+      responses: {
+        200: z.object({
+          columns: z.array(z.string()),
+          preview: z.array(z.record(z.string())),
+          totalRows: z.number(),
+        })
+      }
+    },
+    create: {
+      method: "POST" as const,
+      path: "/api/import/create-tasks" as const,
+      input: z.object({
+        experimentId: z.number(),
+        rows: z.array(z.record(z.any())),
+        mapping: z.record(z.string()),
+      }),
+      responses: { 200: z.object({ created: z.number() }) }
+    }
+  },
+  connectors: {
+    list: {
+      method: "GET" as const,
+      path: "/api/connectors" as const,
+      responses: { 200: z.array(z.custom<typeof apiConnectors.$inferSelect>()) }
+    },
+    create: {
+      method: "POST" as const,
+      path: "/api/connectors" as const,
+      input: insertApiConnectorSchema,
+      responses: { 201: z.custom<typeof apiConnectors.$inferSelect>() }
+    },
+    update: {
+      method: "PUT" as const,
+      path: "/api/connectors/:id" as const,
+      input: insertApiConnectorSchema.partial(),
+      responses: { 200: z.custom<typeof apiConnectors.$inferSelect>() }
+    },
+    delete: {
+      method: "DELETE" as const,
+      path: "/api/connectors/:id" as const,
+      responses: { 204: z.void() }
+    },
+    trigger: {
+      method: "POST" as const,
+      path: "/api/connectors/:id/trigger" as const,
+      responses: { 200: z.object({ fetched: z.number(), created: z.number() }) }
     }
   }
 };

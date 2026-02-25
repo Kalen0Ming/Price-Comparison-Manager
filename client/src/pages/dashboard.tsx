@@ -1,6 +1,6 @@
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FlaskConical, Users, CheckSquare, Tags } from "lucide-react";
+import { FlaskConical, Users, CheckSquare, Tags, Activity } from "lucide-react";
 import { useExperiments } from "@/hooks/use-experiments";
 import { useUsers } from "@/hooks/use-users";
 import { useTasks } from "@/hooks/use-tasks";

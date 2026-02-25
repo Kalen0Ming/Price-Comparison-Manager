@@ -6,7 +6,7 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("annotator"), // admin, annotator, reviewer
+  role: text("role").notNull().default("annotator"),
   email: text("email").notNull(),
 });
 
@@ -17,15 +17,15 @@ export const experiments = pgTable("experiments", {
   createdAt: timestamp("created_at").defaultNow(),
   deadline: timestamp("deadline"),
   enableReview: boolean("enable_review").default(false).notNull(),
-  reviewRatio: integer("review_ratio").default(0).notNull(), // e.g. 30 for 30%
-  status: text("status").notNull().default("draft"), // draft, in_progress, archived
+  reviewRatio: integer("review_ratio").default(0).notNull(),
+  status: text("status").notNull().default("draft"),
 });
 
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull(),
-  originalData: json("original_data").notNull(), // stores product A and B info
-  status: text("status").notNull().default("pending"), // pending, annotated, needs_review
+  originalData: json("original_data").notNull(),
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -33,8 +33,8 @@ export const annotations = pgTable("annotations", {
   id: serial("id").primaryKey(),
   taskId: integer("task_id").notNull(),
   userId: integer("user_id").notNull(),
-  result: json("result").notNull(), // e.g. {'is_same_product': true, 'price_comparison': 'A>B'}
-  type: text("type").notNull().default("initial"), // initial, review
+  result: json("result").notNull(),
+  type: text("type").notNull().default("initial"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -47,12 +47,29 @@ export const logs = pgTable("logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const apiConnectors = pgTable("api_connectors", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  url: text("url").notNull(),
+  authType: text("auth_type").notNull().default("api_key"), // api_key, bearer, none
+  authValue: text("auth_value"),
+  fetchFrequency: text("fetch_frequency").notNull().default("manual"), // manual, daily
+  experimentId: integer("experiment_id"),
+  fieldMapping: json("field_mapping"), // maps API JSON fields to task originalData keys
+  lastFetchedAt: timestamp("last_fetched_at"),
+  status: text("status").notNull().default("active"), // active, paused
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertExperimentSchema = createInsertSchema(experiments).omit({ id: true, createdAt: true });
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true });
 export const insertAnnotationSchema = createInsertSchema(annotations).omit({ id: true, createdAt: true });
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, createdAt: true });
+export const insertApiConnectorSchema = createInsertSchema(apiConnectors).omit({ id: true, createdAt: true, lastFetchedAt: true });
 
+// Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
@@ -68,7 +85,19 @@ export type InsertAnnotation = z.infer<typeof insertAnnotationSchema>;
 export type Log = typeof logs.$inferSelect;
 export type InsertLog = z.infer<typeof insertLogSchema>;
 
-// Request types
+export type ApiConnector = typeof apiConnectors.$inferSelect;
+export type InsertApiConnector = z.infer<typeof insertApiConnectorSchema>;
+
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UpdateExperimentRequest = Partial<InsertExperiment>;
 export type UpdateTaskRequest = Partial<InsertTask>;
+export type UpdateApiConnectorRequest = Partial<InsertApiConnector>;
+
+export interface ExperimentStats {
+  totalTasks: number;
+  pendingTasks: number;
+  annotatedTasks: number;
+  needsReviewTasks: number;
+  sampleTasks: Task[];
+  fieldDistributions: Record<string, Record<string, number>>;
+}

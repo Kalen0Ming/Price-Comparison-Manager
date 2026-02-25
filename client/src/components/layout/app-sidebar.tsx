@@ -1,12 +1,14 @@
 import { Link, useLocation } from "wouter";
-import { 
-  Users, 
-  FlaskConical, 
-  CheckSquare, 
-  Tags, 
-  Activity, 
+import {
+  Users,
+  FlaskConical,
+  CheckSquare,
+  Tags,
+  Activity,
   LayoutDashboard,
-  LogOut
+  LogOut,
+  Upload,
+  Link2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -22,12 +24,17 @@ import {
 import { useLogout } from "@/hooks/use-auth";
 
 const navItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Experiments", url: "/experiments", icon: FlaskConical },
-  { title: "Tasks", url: "/tasks", icon: CheckSquare },
-  { title: "Annotations", url: "/annotations", icon: Tags },
-  { title: "Users", url: "/users", icon: Users },
-  { title: "System Logs", url: "/logs", icon: Activity },
+  { title: "仪表盘", url: "/dashboard", icon: LayoutDashboard },
+  { title: "实验管理", url: "/experiments", icon: FlaskConical },
+  { title: "任务列表", url: "/tasks", icon: CheckSquare },
+  { title: "标注结果", url: "/annotations", icon: Tags },
+  { title: "用户管理", url: "/users", icon: Users },
+  { title: "系统日志", url: "/logs", icon: Activity },
+];
+
+const dataItems = [
+  { title: "数据导入", url: "/import", icon: Upload },
+  { title: "API 连接器", url: "/connector", icon: Link2 },
 ];
 
 export function AppSidebar() {
@@ -39,23 +46,51 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <div className="p-4 mb-2">
-            <h2 className="text-2xl font-display font-bold text-sidebar-primary-foreground flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-sidebar-primary-foreground flex items-center gap-2">
               <FlaskConical className="w-6 h-6 text-primary" />
               <span>LabelFlow</span>
             </h2>
-            <p className="text-xs text-sidebar-foreground/60 mt-1">Admin Workspace</p>
+            <p className="text-xs text-sidebar-foreground/60 mt-1">比价标注管理平台</p>
           </div>
           <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
-            Platform Management
+            平台管理
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
+                const isActive = location === item.url || (item.url === "/experiments" && location.startsWith("/experiments/"));
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive}
+                      tooltip={item.title}
+                      className={isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                    >
+                      <Link href={item.url} className="flex items-center gap-3">
+                        <item.icon className="w-5 h-5" />
+                        <span className="font-medium">{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
+            数据接入
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {dataItems.map((item) => {
                 const isActive = location === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton 
-                      asChild 
+                    <SidebarMenuButton
+                      asChild
                       isActive={isActive}
                       tooltip={item.title}
                       className={isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
@@ -73,12 +108,12 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4">
-        <SidebarMenuButton 
+        <SidebarMenuButton
           onClick={logout}
           className="w-full justify-start text-red-400 hover:text-red-300 hover:bg-red-400/10 transition-colors"
         >
           <LogOut className="w-5 h-5 mr-2" />
-          <span>Sign Out</span>
+          <span>退出登录</span>
         </SidebarMenuButton>
       </SidebarFooter>
     </Sidebar>

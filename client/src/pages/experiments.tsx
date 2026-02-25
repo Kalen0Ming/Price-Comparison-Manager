@@ -2,6 +2,7 @@ import { useState } from "react";
 import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useLocation } from "wouter";
 import * as z from "zod";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ export default function Experiments() {
   const { data: experiments = [], isLoading } = useExperiments();
   const createExperiment = useCreateExperiment();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [, setLocation] = useLocation();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -200,7 +202,15 @@ export default function Experiments() {
                       {exp.deadline ? format(new Date(exp.deadline), 'MMM d, yyyy') : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" className="text-primary hover:text-primary/80">View</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-primary"
+                        onClick={() => setLocation(`/experiments/${exp.id}`)}
+                        data-testid={`button-view-experiment-${exp.id}`}
+                      >
+                        查看详情
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
