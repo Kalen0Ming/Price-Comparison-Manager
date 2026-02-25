@@ -22,8 +22,7 @@ const managerItems = [
   { title: "标注结果", url: "/annotations", icon: Tags },
 ];
 
-const annotatorItems = [
-  { title: "我的任务", url: "/my-tasks", icon: ClipboardList },
+const annotatorExtraItems = [
   { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
 ];
 
@@ -124,34 +123,47 @@ export function AppSidebar() {
             </>
           )}
 
-          {!isManager && (
-            <>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
-                我的工作
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {annotatorItems.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.url)}
-                        tooltip={item.title}
-                        className={isActive(item.url)
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                      >
-                        <Link href={item.url} className="flex items-center gap-3">
-                          <item.icon className="w-5 h-5" />
-                          <span className="font-medium">{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </>
-          )}
+          <>
+            <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs mt-2">
+              我的工作
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/my-tasks")}
+                    tooltip="我的任务"
+                    className={isActive("/my-tasks")
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                  >
+                    <Link href="/my-tasks" className="flex items-center gap-3">
+                      <ClipboardList className="w-5 h-5" />
+                      <span className="font-medium">我的任务</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                {!isManager && annotatorExtraItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.url)}
+                      tooltip={item.title}
+                      className={isActive(item.url)
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                    >
+                      <Link href={item.url} className="flex items-center gap-3">
+                        <item.icon className="w-5 h-5" />
+                        <span className="font-medium">{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </>
         </SidebarGroup>
 
         {isManager && (

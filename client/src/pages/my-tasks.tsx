@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { User } from "@shared/schema";
 import { useLocation } from "wouter";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentUser } from "@/hooks/use-auth";
-import { ClipboardList, ChevronRight, Clock, CheckCircle, AlertCircle, AlertTriangle } from "lucide-react";
+import { ClipboardList, ChevronRight, Clock, CheckCircle, AlertCircle, AlertTriangle, Eye } from "lucide-react";
 import { format, differenceInHours, differenceInDays } from "date-fns";
 import type { Task, Experiment, AnnotationTemplate, DisplayField } from "@shared/schema";
 
@@ -107,15 +108,25 @@ export default function MyTasks() {
   const user = getCurrentUser();
   const [, setLocation] = useLocation();
 
+  const isAdmin = user?.role === "admin";
+
   const { data: tasks = [], isLoading } = useQuery<TaskWithExperiment[]>({
-    queryKey: ["/api/my-tasks", user?.id],
+    queryKey: ["/api/my-tasks", user?.id, isAdmin],
     queryFn: async () => {
       if (!user) return [];
-      const res = await fetch(`/api/my-tasks?userId=${user.id}`);
+      const url = isAdmin ? `/api/my-tasks?all=true` : `/api/my-tasks?userId=${user.id}`;
+      const res = await fetch(url);
       return res.json();
     },
     enabled: !!user,
   });
+
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+    enabled: isAdmin,
+  });
+
+  const userMap = Object.fromEntries(users.map(u => [u.id, u.username]));
 
   const pendingTasks = tasks.filter(t => t.status === "pending" || t.status === "assigned" || t.status === "needs_review");
   const completedTasks = tasks.filter(t => t.status === "annotated" || t.status === "completed");
@@ -124,11 +135,13 @@ export default function MyTasks() {
     <DashboardLayout>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
-          <ClipboardList className="w-8 h-8 text-primary" />
-          我的任务
+          {isAdmin ? <Eye className="w-8 h-8 text-primary" /> : <ClipboardList className="w-8 h-8 text-primary" />}
+          {isAdmin ? "所有标注任务" : "我的任务"}
         </h1>
         <p className="text-muted-foreground mt-1">
-          你好，{user?.username}！以下是分配给你的标注任务。
+          {isAdmin
+            ? "以管理员身份查看全部标注员的任务，可点击进入任意任务进行标注或查看。"
+            : `你好，${user?.username}！以下是分配给你的标注任务。`}
         </p>
       </div>
 
@@ -183,6 +196,14 @@ export default function MyTasks() {
                       {task.template && (
                         <span className="text-xs text-muted-foreground">模板：{task.template.name}</span>
                       )}
+                      {isAdmin && task.assignedTo && (
+                        <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                          标注员：{userMap[task.assignedTo] ?? `#${task.assignedTo}`}
+                        </span>
+                      )}
+                      {isAdmin && !task.assignedTo && (
+                        <span className="text-xs text-muted-foreground">未分配</span>
+                      )}
                     </div>
                     <TaskPreview task={task} />
                     {task.experiment?.deadline && (
@@ -193,7 +214,7 @@ export default function MyTasks() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0 mt-1">
                     <Button size="sm" className="gap-1.5" data-testid={`button-annotate-${task.id}`}>
-                      开始标注
+                      {isAdmin ? "查看/标注" : "开始标注"}
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>
@@ -211,10 +232,15 @@ export default function MyTasks() {
                 <CardContent className="p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <TaskStatusBadge status={task.status} />
                         {task.experiment && (
                           <Badge variant="outline" className="text-xs">{task.experiment.name}</Badge>
+                        )}
+                        {isAdmin && task.assignedTo && (
+                          <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                            {userMap[task.assignedTo] ?? `#${task.assignedTo}`}
+                          </span>
                         )}
                       </div>
                       <TaskPreview task={task} />

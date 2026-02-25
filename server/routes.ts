@@ -397,8 +397,10 @@ export async function registerRoutes(
   // My tasks (for annotators)
   app.get("/api/my-tasks", async (req, res) => {
     try {
-      const userId = z.coerce.number().parse(req.query.userId);
-      const myTasks = await storage.getMyTasks(userId);
+      const showAll = req.query.all === "true";
+      const myTasks = showAll
+        ? await storage.getTasks()
+        : await storage.getMyTasks(z.coerce.number().parse(req.query.userId));
       const expIds = Array.from(new Set(myTasks.map(t => t.experimentId)));
       const expMap: Record<number, any> = {};
       const templateMap: Record<number, any> = {};
@@ -419,7 +421,7 @@ export async function registerRoutes(
       });
       res.json(enriched);
     } catch {
-      res.status(400).json({ message: "Invalid userId" });
+      res.status(400).json({ message: "Invalid request" });
     }
   });
 
