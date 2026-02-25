@@ -342,12 +342,33 @@ export async function registerRoutes(
   // Task assignment: manual
   app.post("/api/experiments/:id/assign", async (req, res) => {
     try {
+      const expId = Number(req.params.id);
       const { userId, taskIds } = z.object({
         userId: z.number(),
         taskIds: z.array(z.number()),
       }).parse(req.body);
       const count = await storage.assignTasksToUser(taskIds, userId);
-      res.json({ assigned: count });
+      // Create batch record
+      const exp = await storage.getExperiment(expId);
+      const now = new Date();
+      const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
+      const reviewFlag = exp?.enableReview ? "R" : "N";
+      const batchCode = `${ymd}-${count}T-1U-M-${reviewFlag}`;
+      const batch = await storage.createTaskBatch({
+        code: batchCode,
+        experimentId: expId,
+        taskCount: count,
+        userCount: 1,
+        assignType: "manual",
+        reviewEnabled: exp?.enableReview ?? false,
+        taskIds: taskIds as any,
+        assignedUserIds: [userId] as any,
+      });
+      // Update tasks with batchId
+      for (const tid of taskIds) {
+        await storage.updateTask(tid, { batchId: batch.id } as any);
+      }
+      res.json({ assigned: count, batch });
     } catch {
       res.status(400).json({ message: "Invalid input" });
     }
@@ -363,9 +384,86 @@ export async function registerRoutes(
       }).parse(req.body);
       const result = await storage.assignTasksRandom(expId, userIds, count);
       const total = Object.values(result).reduce((a, b) => a + b, 0);
-      res.json({ assigned: total, distribution: result });
+      // Create batch record
+      const exp = await storage.getExperiment(expId);
+      const now = new Date();
+      const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
+      const reviewFlag = exp?.enableReview ? "R" : "N";
+      const batchCode = `${ymd}-${total}T-${userIds.length}U-A-${reviewFlag}`;
+      const allExpTasks = await storage.getTasks(expId);
+      const assignedTaskIds = allExpTasks
+        .filter(t => t.assignedTo && userIds.includes(t.assignedTo) && t.status === "assigned")
+        .map(t => t.id);
+      const recentBatchIds = assignedTaskIds.slice(-total);
+      const batch = await storage.createTaskBatch({
+        code: batchCode,
+        experimentId: expId,
+        taskCount: total,
+        userCount: userIds.length,
+        assignType: "auto",
+        reviewEnabled: exp?.enableReview ?? false,
+        taskIds: recentBatchIds as any,
+        assignedUserIds: userIds as any,
+      });
+      // Update tasks with batchId
+      for (const tid of recentBatchIds) {
+        await storage.updateTask(tid, { batchId: batch.id } as any);
+      }
+      res.json({ assigned: total, distribution: result, batch });
     } catch {
       res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // Reset assignments for an experiment
+  app.post("/api/experiments/:id/reset-assignments", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const count = await storage.resetExperimentAssignments(expId);
+      res.json({ reset: count });
+    } catch {
+      res.status(500).json({ message: "Reset failed" });
+    }
+  });
+
+  // Task batches list
+  app.get("/api/task-batches", async (req, res) => {
+    try {
+      const { search, startDate, endDate, experimentId } = z.object({
+        search: z.string().optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        experimentId: z.coerce.number().optional(),
+      }).parse(req.query);
+      const batches = await storage.getTaskBatches({
+        search,
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        experimentId,
+      });
+      // Enrich with experiment info
+      const enriched = await Promise.all(batches.map(async (b) => {
+        const exp = await storage.getExperiment(b.experimentId);
+        return { ...b, experiment: exp ?? null };
+      }));
+      res.json(enriched);
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // Task batch results
+  app.get("/api/task-batches/:id/results", async (req, res) => {
+    try {
+      const batchId = Number(req.params.id);
+      const batch = await storage.getTaskBatch(batchId);
+      if (!batch) return res.status(404).json({ message: "Batch not found" });
+      const exp = await storage.getExperiment(batch.experimentId);
+      const template = exp?.templateId ? await storage.getTemplate(exp.templateId) : null;
+      const taskResults = await storage.getTaskBatchResults(batchId);
+      res.json({ batch, experiment: exp ?? null, template, tasks: taskResults });
+    } catch {
+      res.status(500).json({ message: "Failed to load batch results" });
     }
   });
 

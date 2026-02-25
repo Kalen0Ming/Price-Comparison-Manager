@@ -11,8 +11,6 @@ import Users from "./pages/users";
 import Experiments from "./pages/experiments";
 import ExperimentDetail from "./pages/experiment-detail";
 import Tasks from "./pages/tasks";
-import Annotations from "./pages/annotations";
-import Logs from "./pages/logs";
 import ImportPage from "./pages/import";
 import ConnectorPage from "./pages/connector";
 import MyTasks from "./pages/my-tasks";
@@ -31,8 +29,6 @@ function Router() {
       <Route path="/experiments" component={Experiments} />
       <Route path="/experiments/:id" component={ExperimentDetail} />
       <Route path="/tasks" component={Tasks} />
-      <Route path="/annotations" component={Annotations} />
-      <Route path="/logs" component={Logs} />
       <Route path="/import" component={ImportPage} />
       <Route path="/connector" component={ConnectorPage} />
       <Route path="/my-tasks" component={MyTasks} />

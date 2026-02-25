@@ -34,9 +34,23 @@ export const experiments = pgTable("experiments", {
   templateId: integer("template_id"),
 });
 
+export const taskBatches = pgTable("task_batches", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  experimentId: integer("experiment_id").notNull(),
+  taskCount: integer("task_count").notNull(),
+  userCount: integer("user_count").notNull(),
+  assignType: text("assign_type").notNull().default("auto"),
+  reviewEnabled: boolean("review_enabled").default(false),
+  taskIds: json("task_ids"),
+  assignedUserIds: json("assigned_user_ids"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull(),
+  batchId: integer("batch_id"),
   originalData: json("original_data").notNull(),
   status: text("status").notNull().default("pending"),
   assignedTo: integer("assigned_to"),
@@ -99,6 +113,7 @@ export const systemSettings = pgTable("system_settings", {
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertTemplateSchema = createInsertSchema(annotationTemplates).omit({ id: true, createdAt: true });
 export const insertExperimentSchema = createInsertSchema(experiments).omit({ id: true, createdAt: true });
+export const insertTaskBatchSchema = createInsertSchema(taskBatches).omit({ id: true, createdAt: true });
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true });
 export const insertAnnotationSchema = createInsertSchema(annotations).omit({ id: true, createdAt: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
@@ -115,6 +130,9 @@ export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 
 export type Experiment = typeof experiments.$inferSelect;
 export type InsertExperiment = z.infer<typeof insertExperimentSchema>;
+
+export type TaskBatch = typeof taskBatches.$inferSelect;
+export type InsertTaskBatch = z.infer<typeof insertTaskBatchSchema>;
 
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;

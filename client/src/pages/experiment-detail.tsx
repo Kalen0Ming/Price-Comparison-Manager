@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight, Archive, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight, Archive, Download, Loader2, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import type { Experiment, ExperimentStats, User, Task, Annotation } from "@shared/schema";
 
@@ -353,6 +353,85 @@ function ArchiveDialog({ expId, expName, expStatus }: { expId: number; expName: 
   );
 }
 
+function ResetAssignDialog({ expId, tasks, expStatus }: { expId: number; tasks: Task[]; expStatus: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+
+  const assignedCount = tasks.filter(t => t.status === "assigned").length;
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/experiments/${expId}/reset-assignments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("重置失败");
+      return res.json() as Promise<{ reset: number }>;
+    },
+    onSuccess: (data) => {
+      toast({ title: "重置成功", description: `已将 ${data.reset} 条任务恢复为待分配状态。` });
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      setOpen(false);
+    },
+    onError: () => toast({ variant: "destructive", title: "重置失败", description: "请稍后再试" }),
+  });
+
+  if (expStatus === "archived" || assignedCount === 0) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+          data-testid="button-reset-assignments"
+        >
+          <RotateCcw className="w-4 h-4" />
+          重置分配
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RotateCcw className="w-5 h-5 text-rose-600" />
+            重置任务分配
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+            <p>将还原 <span className="font-bold">{assignedCount}</span> 条已分配但未标注的任务为「待分配」状态，之后可重新分配给标注员。</p>
+            <p className="mt-1.5 text-rose-600 text-xs">注意：仅处理"待标注"状态的任务，已完成标注的任务不受影响。</p>
+          </div>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setOpen(false)}
+              disabled={resetMutation.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              className="flex-1 gap-2 bg-rose-600 hover:bg-rose-700"
+              onClick={() => resetMutation.mutate()}
+              disabled={resetMutation.isPending}
+              data-testid="button-confirm-reset"
+            >
+              {resetMutation.isPending ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />重置中...</>
+              ) : (
+                <>确认重置 {assignedCount} 条任务</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type ReviewQueueItem = Task & {
   initialAnnotation: Annotation | null;
   reviewAnnotation: Annotation | null;
@@ -443,6 +522,7 @@ export default function ExperimentDetail() {
             <div className="flex gap-2 flex-wrap">
               <ManualAssignDialog expId={expId} tasks={allTasks} users={users} />
               <RandomAssignDialog expId={expId} tasks={allTasks} users={users} />
+              <ResetAssignDialog expId={expId} tasks={allTasks} expStatus={experiment?.status || ""} />
               <ArchiveDialog
                 expId={expId}
                 expName={experiment?.name || ""}

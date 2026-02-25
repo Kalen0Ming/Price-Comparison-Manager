@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import {
-  Users, FlaskConical, CheckSquare, Tags, Activity, LayoutDashboard,
+  Users, FlaskConical, CheckSquare, LayoutDashboard,
   LogOut, Upload, Link2, ClipboardList, ShieldCheck, LayoutTemplate,
 } from "lucide-react";
 import {
@@ -12,14 +12,12 @@ import { useLogout, getCurrentUser } from "@/hooks/use-auth";
 const adminOnlyItems = [
   { title: "仪表盘", url: "/dashboard", icon: LayoutDashboard },
   { title: "用户管理", url: "/users", icon: Users },
-  { title: "系统日志", url: "/logs", icon: Activity },
 ];
 
 const managerItems = [
   { title: "实验管理", url: "/experiments", icon: FlaskConical },
   { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
-  { title: "任务列表", url: "/tasks", icon: CheckSquare },
-  { title: "标注结果", url: "/annotations", icon: Tags },
+  { title: "分配批次管理", url: "/tasks", icon: CheckSquare },
 ];
 
 const annotatorExtraItems = [

@@ -1,9 +1,10 @@
 import { db } from "./db";
 import {
-  users, annotationTemplates, experiments, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
+  users, annotationTemplates, experiments, taskBatches, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
   type User, type InsertUser, type UpdateUserRequest,
   type AnnotationTemplate, type InsertTemplate,
   type Experiment, type InsertExperiment, type UpdateExperimentRequest,
+  type TaskBatch, type InsertTaskBatch,
   type Task, type InsertTask,
   type Annotation, type InsertAnnotation,
   type Notification, type InsertNotification,
@@ -12,7 +13,7 @@ import {
   type SystemSetting,
   type ExperimentStats,
 } from "@shared/schema";
-import { eq, isNull, and, inArray, or } from "drizzle-orm";
+import { eq, isNull, and, inArray, or, gte, lte, like } from "drizzle-orm";
 
 export interface IStorage {
   // Templates
@@ -51,6 +52,13 @@ export interface IStorage {
   adjudicateTask(taskId: number, finalResult: Record<string, unknown>): Promise<Task>;
   getMyExperiments(userId: number): Promise<{ experiment: Experiment; totalTasks: number; annotatedTasks: number }[]>;
   getExperimentTasksForUser(experimentId: number, userId: number | null): Promise<(Task & { annotation: Annotation | null })[]>;
+  resetExperimentAssignments(experimentId: number): Promise<number>;
+
+  // Task Batches
+  createTaskBatch(batch: InsertTaskBatch): Promise<TaskBatch>;
+  getTaskBatches(filters?: { search?: string; startDate?: Date; endDate?: Date; experimentId?: number }): Promise<TaskBatch[]>;
+  getTaskBatch(id: number): Promise<TaskBatch | undefined>;
+  getTaskBatchResults(batchId: number): Promise<(Task & { annotation: Annotation | null; annotatorName: string | null })[]>;
 
   // Annotations
   getAnnotations(): Promise<Annotation[]>;
@@ -273,6 +281,66 @@ export class DatabaseStorage implements IStorage {
         and(eq(annotations.taskId, task.id), ...(userId ? [eq(annotations.userId, userId)] : []))
       );
       result.push({ ...task, annotation: ann || null });
+    }
+    return result;
+  }
+
+  async resetExperimentAssignments(experimentId: number): Promise<number> {
+    const assignedTasks = await db.select().from(tasks).where(
+      and(eq(tasks.experimentId, experimentId), eq(tasks.status, "assigned"))
+    );
+    if (assignedTasks.length === 0) return 0;
+    const ids = assignedTasks.map(t => t.id);
+    await db.update(tasks)
+      .set({ status: "pending", assignedTo: null, assignedAt: null, batchId: null } as any)
+      .where(inArray(tasks.id, ids));
+    return ids.length;
+  }
+
+  async createTaskBatch(batch: InsertTaskBatch): Promise<TaskBatch> {
+    const [created] = await db.insert(taskBatches).values(batch).returning();
+    return created;
+  }
+
+  async getTaskBatches(filters?: { search?: string; startDate?: Date; endDate?: Date; experimentId?: number }): Promise<TaskBatch[]> {
+    let allBatches = await db.select().from(taskBatches).orderBy(taskBatches.createdAt);
+    if (filters?.experimentId) {
+      allBatches = allBatches.filter(b => b.experimentId === filters.experimentId);
+    }
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      allBatches = allBatches.filter(b => b.code.toLowerCase().includes(q));
+    }
+    if (filters?.startDate) {
+      allBatches = allBatches.filter(b => b.createdAt && new Date(b.createdAt) >= filters.startDate!);
+    }
+    if (filters?.endDate) {
+      const endOfDay = new Date(filters.endDate);
+      endOfDay.setHours(23, 59, 59, 999);
+      allBatches = allBatches.filter(b => b.createdAt && new Date(b.createdAt) <= endOfDay);
+    }
+    return allBatches.reverse();
+  }
+
+  async getTaskBatch(id: number): Promise<TaskBatch | undefined> {
+    const [batch] = await db.select().from(taskBatches).where(eq(taskBatches.id, id));
+    return batch;
+  }
+
+  async getTaskBatchResults(batchId: number): Promise<(Task & { annotation: Annotation | null; annotatorName: string | null })[]> {
+    const batch = await this.getTaskBatch(batchId);
+    if (!batch) return [];
+    const taskIdList = batch.taskIds as number[] | null;
+    if (!taskIdList || taskIdList.length === 0) return [];
+    const batchTasks = await db.select().from(tasks).where(inArray(tasks.id, taskIdList));
+    const allUsers = await this.getUsers();
+    const result: (Task & { annotation: Annotation | null; annotatorName: string | null })[] = [];
+    for (const task of batchTasks) {
+      const [ann] = await db.select().from(annotations).where(
+        and(eq(annotations.taskId, task.id), eq(annotations.type, "initial"))
+      );
+      const annotator = task.assignedTo ? allUsers.find(u => u.id === task.assignedTo) : null;
+      result.push({ ...task, annotation: ann || null, annotatorName: annotator?.username ?? null });
     }
     return result;
   }
