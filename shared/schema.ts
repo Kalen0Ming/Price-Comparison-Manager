@@ -25,9 +25,12 @@ export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull(),
   originalData: json("original_data").notNull(),
-  status: text("status").notNull().default("pending"), // pending, assigned, annotated, needs_review
-  assignedTo: integer("assigned_to"), // user id of the assigned annotator
+  // status: pending → assigned → annotated → needs_review → completed
+  status: text("status").notNull().default("pending"),
+  assignedTo: integer("assigned_to"),      // annotator user id
   assignedAt: timestamp("assigned_at"),
+  reviewedBy: integer("reviewed_by"),       // reviewer user id
+  finalResult: json("final_result"),        // adjudicated final result
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -116,6 +119,15 @@ export interface ExperimentStats {
   assignedTasks: number;
   annotatedTasks: number;
   needsReviewTasks: number;
+  completedTasks: number;
   sampleTasks: Task[];
   fieldDistributions: Record<string, Record<string, number>>;
+}
+
+// Enriched task for review workflow
+export interface TaskWithAnnotations extends Task {
+  experiment?: Experiment | null;
+  initialAnnotation?: Annotation | null;
+  reviewAnnotation?: Annotation | null;
+  allAnnotations?: Annotation[];
 }

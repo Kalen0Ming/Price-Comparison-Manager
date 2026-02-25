@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -11,9 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, Database, UserPlus, Shuffle, Users } from "lucide-react";
+import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
-import type { Experiment, ExperimentStats, User, Task } from "@shared/schema";
+import type { Experiment, ExperimentStats, User, Task, Annotation } from "@shared/schema";
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -34,9 +35,10 @@ function TaskStatusBadge({ status }: { status: string }) {
     pending: "bg-slate-100 text-slate-700",
     assigned: "bg-amber-100 text-amber-700",
     annotated: "bg-green-100 text-green-700",
-    needs_review: "bg-red-100 text-red-700",
+    needs_review: "bg-orange-100 text-orange-700",
+    completed: "bg-emerald-100 text-emerald-700",
   };
-  const labels: Record<string, string> = { pending: "待分配", assigned: "待标注", annotated: "已标注", needs_review: "需复核" };
+  const labels: Record<string, string> = { pending: "待分配", assigned: "待标注", annotated: "已标注", needs_review: "待复核", completed: "已完成" };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[status] || "bg-muted"}`}>
       {labels[status] || status}
@@ -243,10 +245,19 @@ function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Tas
   );
 }
 
+type ReviewQueueItem = Task & {
+  initialAnnotation: Annotation | null;
+  reviewAnnotation: Annotation | null;
+  annotatorUser: { id: number; username: string } | null;
+  reviewerUser: { id: number; username: string } | null;
+  hasConflict: boolean;
+};
+
 export default function ExperimentDetail() {
   const { id } = useParams<{ id: string }>();
   const expId = Number(id);
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
   const { data: experiment, isLoading: expLoading } = useQuery<Experiment>({
     queryKey: ["/api/experiments", expId],
@@ -277,6 +288,14 @@ export default function ExperimentDetail() {
     queryKey: ["/api/users"],
     queryFn: async () => {
       const r = await fetch("/api/users");
+      return r.json();
+    },
+  });
+
+  const { data: reviewQueue = [], isLoading: reviewLoading } = useQuery<ReviewQueueItem[]>({
+    queryKey: ["/api/experiments", expId, "review-queue"],
+    queryFn: async () => {
+      const r = await fetch(`/api/experiments/${expId}/review-queue`);
       return r.json();
     },
   });
@@ -472,6 +491,139 @@ export default function ExperimentDetail() {
           </Card>
         </div>
       </div>
+
+      {/* Review Queue Section */}
+      {(reviewQueue.length > 0 || experiment?.enableReview) && (
+        <div className="mt-8">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-amber-500" />
+                    复核队列
+                    {experiment?.enableReview && (
+                      <Badge variant="outline" className="text-xs ml-1">
+                        抽样比例 {experiment.reviewRatio}%
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    已进入复核流程的任务，点击任意行可查看初标/复标对比并进行裁定
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="flex items-center gap-1.5 text-amber-600">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                    待复核 {reviewQueue.filter(t => t.status === "needs_review").length}
+                  </span>
+                  <span className="flex items-center gap-1.5 text-emerald-600">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                    已完成 {reviewQueue.filter(t => t.status === "completed").length}
+                  </span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {reviewLoading ? (
+                <div className="p-6 space-y-2">
+                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+                </div>
+              ) : reviewQueue.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground">
+                  <ShieldCheck className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">暂无任务进入复核流程</p>
+                  <p className="text-xs mt-1">
+                    {experiment?.enableReview
+                      ? `当标注员提交初标后，系统将按 ${experiment.reviewRatio}% 概率随机抽取进行复核`
+                      : "该实验未开启复核功能"}
+                  </p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12">任务</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>初标员</TableHead>
+                      <TableHead>复核员</TableHead>
+                      <TableHead>分歧</TableHead>
+                      <TableHead>初标结果预览</TableHead>
+                      <TableHead className="w-24"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reviewQueue.map((item) => {
+                      const initResult = item.initialAnnotation?.result as Record<string, unknown> | null;
+                      const reviewResult = item.reviewAnnotation?.result as Record<string, unknown> | null;
+                      const LABELS: Record<string, Record<string, string>> = {
+                        is_same_product: { yes: "同款", no: "非同款", uncertain: "不确定" },
+                        price_comparison: { "A>B": "A贵", "A<B": "B贵", "A=B": "相同", unknown: "未知" },
+                      };
+                      return (
+                        <TableRow
+                          key={item.id}
+                          className={`cursor-pointer hover:bg-muted/40 transition-colors ${item.hasConflict ? "bg-red-50/50" : ""}`}
+                          onClick={() => setLocation(`/review/${item.id}`)}
+                          data-testid={`row-review-${item.id}`}
+                        >
+                          <TableCell className="font-mono text-xs text-muted-foreground">#{item.id}</TableCell>
+                          <TableCell><TaskStatusBadge status={item.status} /></TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {item.annotatorUser?.username || "—"}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {item.reviewerUser?.username || "待分配"}
+                          </TableCell>
+                          <TableCell>
+                            {item.hasConflict ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-red-600 font-medium">
+                                <AlertTriangle className="w-3 h-3" /> 有分歧
+                              </span>
+                            ) : item.reviewAnnotation ? (
+                              <span className="text-xs text-green-600">✓ 一致</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">待复核</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {initResult ? (
+                              <div className="flex gap-1.5 flex-wrap">
+                                {Object.entries(initResult)
+                                  .filter(([k]) => k !== "notes")
+                                  .slice(0, 2)
+                                  .map(([k, v]) => (
+                                    <span key={k} className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">
+                                      {LABELS[k]?.[String(v)] || String(v)}
+                                    </span>
+                                  ))
+                                }
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button size="sm" variant="ghost" className="gap-1 text-xs h-7 px-2" data-testid={`button-view-review-${item.id}`}>
+                              {item.status === "completed" ? (
+                                <><CheckCircle className="w-3 h-3 text-green-500" /> 查看</>
+                              ) : item.reviewAnnotation ? (
+                                <><Gavel className="w-3 h-3 text-primary" /> 裁定</>
+                              ) : (
+                                <><ChevronRight className="w-3 h-3" /> 待复核</>
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

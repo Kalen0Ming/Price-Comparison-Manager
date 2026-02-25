@@ -10,7 +10,7 @@ import {
   type ApiConnector, type InsertApiConnector, type UpdateApiConnectorRequest,
   type ExperimentStats,
 } from "@shared/schema";
-import { eq, isNull, and, inArray } from "drizzle-orm";
+import { eq, isNull, and, inArray, or } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -30,15 +30,19 @@ export interface IStorage {
   getTasks(experimentId?: number): Promise<Task[]>;
   getTask(id: number): Promise<Task | undefined>;
   getMyTasks(userId: number): Promise<Task[]>;
+  getMyReviewTasks(userId: number): Promise<Task[]>;
+  getTasksNeedingAdjudication(experimentId: number): Promise<Task[]>;
   createTask(task: InsertTask): Promise<Task>;
   bulkCreateTasks(tasks: InsertTask[]): Promise<number>;
   updateTask(id: number, updates: Partial<InsertTask>): Promise<Task>;
   assignTasksToUser(taskIds: number[], userId: number): Promise<number>;
   assignTasksRandom(experimentId: number, userIds: number[], count?: number): Promise<Record<number, number>>;
+  adjudicateTask(taskId: number, finalResult: Record<string, unknown>): Promise<Task>;
 
   // Annotations
   getAnnotations(): Promise<Annotation[]>;
   getAnnotationByTask(taskId: number): Promise<Annotation | undefined>;
+  getAnnotationsByTask(taskId: number): Promise<Annotation[]>;
   createAnnotation(annotation: InsertAnnotation): Promise<Annotation>;
   upsertAnnotation(annotation: InsertAnnotation): Promise<Annotation>;
 
@@ -106,6 +110,7 @@ export class DatabaseStorage implements IStorage {
     const assignedTasks = allTasks.filter(t => t.status === "assigned").length;
     const annotatedTasks = allTasks.filter(t => t.status === "annotated").length;
     const needsReviewTasks = allTasks.filter(t => t.status === "needs_review").length;
+    const completedTasks = allTasks.filter(t => t.status === "completed").length;
     const sampleTasks = allTasks.slice(0, 10);
 
     const fieldDistributions: Record<string, Record<string, number>> = {};
@@ -122,18 +127,14 @@ export class DatabaseStorage implements IStorage {
 
     const categoricalDistributions: Record<string, Record<string, number>> = {};
     for (const [key, dist] of Object.entries(fieldDistributions)) {
-      if (Object.keys(dist).length <= 15) {
-        categoricalDistributions[key] = dist;
-      }
+      if (Object.keys(dist).length <= 15) categoricalDistributions[key] = dist;
     }
 
-    return { totalTasks, pendingTasks, assignedTasks, annotatedTasks, needsReviewTasks, sampleTasks, fieldDistributions: categoricalDistributions };
+    return { totalTasks, pendingTasks, assignedTasks, annotatedTasks, needsReviewTasks, completedTasks, sampleTasks, fieldDistributions: categoricalDistributions };
   }
 
   async getTasks(experimentId?: number): Promise<Task[]> {
-    if (experimentId) {
-      return await db.select().from(tasks).where(eq(tasks.experimentId, experimentId));
-    }
+    if (experimentId) return await db.select().from(tasks).where(eq(tasks.experimentId, experimentId));
     return await db.select().from(tasks);
   }
 
@@ -144,7 +145,24 @@ export class DatabaseStorage implements IStorage {
 
   async getMyTasks(userId: number): Promise<Task[]> {
     return await db.select().from(tasks).where(
-      and(eq(tasks.assignedTo, userId), inArray(tasks.status, ["assigned", "pending"]))
+      and(eq(tasks.assignedTo, userId), inArray(tasks.status, ["assigned", "pending", "annotated"]))
+    );
+  }
+
+  // Tasks assigned for review to this user
+  async getMyReviewTasks(userId: number): Promise<Task[]> {
+    return await db.select().from(tasks).where(
+      and(eq(tasks.reviewedBy, userId), eq(tasks.status, "needs_review"))
+    );
+  }
+
+  // Tasks that are in needs_review for a given experiment (to show in admin view)
+  async getTasksNeedingAdjudication(experimentId: number): Promise<Task[]> {
+    return await db.select().from(tasks).where(
+      and(
+        eq(tasks.experimentId, experimentId),
+        inArray(tasks.status, ["needs_review", "completed"])
+      )
     );
   }
 
@@ -179,7 +197,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async assignTasksRandom(experimentId: number, userIds: number[], count?: number): Promise<Record<number, number>> {
-    // Get unassigned tasks
     const unassigned = await db.select().from(tasks).where(
       and(eq(tasks.experimentId, experimentId), isNull(tasks.assignedTo))
     );
@@ -197,13 +214,26 @@ export class DatabaseStorage implements IStorage {
     return assignedCounts;
   }
 
+  async adjudicateTask(taskId: number, finalResult: Record<string, unknown>): Promise<Task> {
+    const [updated] = await db.update(tasks)
+      .set({ finalResult, status: "completed" } as any)
+      .where(eq(tasks.id, taskId))
+      .returning();
+    return updated;
+  }
+
   async getAnnotations(): Promise<Annotation[]> {
     return await db.select().from(annotations);
   }
 
   async getAnnotationByTask(taskId: number): Promise<Annotation | undefined> {
+    // Returns first annotation (initial) for backwards compatibility
     const [ann] = await db.select().from(annotations).where(eq(annotations.taskId, taskId));
     return ann;
+  }
+
+  async getAnnotationsByTask(taskId: number): Promise<Annotation[]> {
+    return await db.select().from(annotations).where(eq(annotations.taskId, taskId));
   }
 
   async createAnnotation(annotation: InsertAnnotation): Promise<Annotation> {
@@ -212,7 +242,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertAnnotation(annotation: InsertAnnotation): Promise<Annotation> {
-    // Check if draft annotation already exists for this task+user
     const [existing] = await db.select().from(annotations).where(
       and(eq(annotations.taskId, annotation.taskId), eq(annotations.userId, annotation.userId))
     );
@@ -227,8 +256,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNotifications(userId: number): Promise<Notification[]> {
-    return await db.select().from(notifications)
-      .where(eq(notifications.userId, userId));
+    return await db.select().from(notifications).where(eq(notifications.userId, userId));
   }
 
   async getUnreadCount(userId: number): Promise<number> {

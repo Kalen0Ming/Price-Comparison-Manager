@@ -17,6 +17,8 @@ import ImportPage from "./pages/import";
 import ConnectorPage from "./pages/connector";
 import MyTasks from "./pages/my-tasks";
 import AnnotationWorkspace from "./pages/annotation-workspace";
+import ReviewTasks from "./pages/review-tasks";
+import ReviewDetail from "./pages/review-detail";
 
 function Router() {
   return (
@@ -33,6 +35,8 @@ function Router() {
       <Route path="/connector" component={ConnectorPage} />
       <Route path="/my-tasks" component={MyTasks} />
       <Route path="/annotation/:id" component={AnnotationWorkspace} />
+      <Route path="/review-tasks" component={ReviewTasks} />
+      <Route path="/review/:id" component={ReviewDetail} />
       <Route component={NotFound} />
     </Switch>
   );
