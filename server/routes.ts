@@ -159,24 +159,100 @@ export async function registerRoutes(
 
   app.post(api.experiments.create.path, async (req, res) => {
     try {
-      const schema = api.experiments.create.input.extend({
-        reviewRatio: z.coerce.number().optional(),
-        enableReview: z.boolean().optional(),
+      const schema = z.object({
+        name: z.string().min(1),
+        description: z.string().optional().nullable(),
+        deadline: z.string().optional().nullable().transform(v => v ? new Date(v) : null),
+        enableReview: z.boolean().optional().default(false),
+        reviewRatio: z.coerce.number().min(0).max(100).optional().default(0),
+        status: z.string().optional().default("draft"),
+        templateId: z.coerce.number().optional().nullable(),
       });
       const input = schema.parse(req.body);
       res.status(201).json(await storage.createExperiment(input as any));
-    } catch {
+    } catch (e) {
+      console.error("Create experiment error:", e);
       res.status(400).json({ message: "Invalid input" });
     }
   });
 
   app.put(api.experiments.update.path, async (req, res) => {
     try {
-      const input = api.experiments.update.input.parse(req.body);
-      res.json(await storage.updateExperiment(Number(req.params.id), input));
+      const schema = z.object({
+        name: z.string().min(1).optional(),
+        description: z.string().optional().nullable(),
+        deadline: z.string().optional().nullable().transform(v => v ? new Date(v) : null),
+        enableReview: z.boolean().optional(),
+        reviewRatio: z.coerce.number().min(0).max(100).optional(),
+        status: z.string().optional(),
+        templateId: z.coerce.number().optional().nullable(),
+      });
+      const input = schema.parse(req.body);
+      res.json(await storage.updateExperiment(Number(req.params.id), input as any));
     } catch {
       res.status(400).json({ message: "Invalid input" });
     }
+  });
+
+  // --- Templates ---
+  app.get("/api/templates", async (req, res) => {
+    res.json(await storage.getTemplates());
+  });
+
+  app.get("/api/templates/:id", async (req, res) => {
+    const t = await storage.getTemplate(Number(req.params.id));
+    if (!t) return res.status(404).json({ message: "Template not found" });
+    res.json(t);
+  });
+
+  app.post("/api/templates", async (req, res) => {
+    try {
+      const schema = z.object({
+        name: z.string().min(1),
+        description: z.string().optional().nullable(),
+        displayFields: z.array(z.object({ key: z.string(), label: z.string() })),
+        annotationFields: z.array(z.object({
+          key: z.string(), label: z.string(),
+          type: z.enum(["select", "radio", "text"]),
+          options: z.array(z.string()).optional(),
+          required: z.boolean().optional(),
+          isJudgment: z.boolean().optional(),
+        })),
+        judgmentField: z.string().min(1),
+      });
+      const input = schema.parse(req.body);
+      res.status(201).json(await storage.createTemplate(input as any));
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ message: "Invalid template" });
+    }
+  });
+
+  app.put("/api/templates/:id", async (req, res) => {
+    try {
+      const schema = z.object({
+        name: z.string().min(1).optional(),
+        description: z.string().optional().nullable(),
+        displayFields: z.array(z.object({ key: z.string(), label: z.string() })).optional(),
+        annotationFields: z.array(z.object({
+          key: z.string(), label: z.string(),
+          type: z.enum(["select", "radio", "text"]),
+          options: z.array(z.string()).optional(),
+          required: z.boolean().optional(),
+          isJudgment: z.boolean().optional(),
+        })).optional(),
+        judgmentField: z.string().optional(),
+      });
+      const input = schema.parse(req.body);
+      res.json(await storage.updateTemplate(Number(req.params.id), input as any));
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.delete("/api/templates/:id", async (req, res) => {
+    await storage.deleteTemplate(Number(req.params.id));
+    res.json({ success: true });
   });
 
   // Tasks awaiting adjudication (has both initial + review annotations)
@@ -254,12 +330,12 @@ export async function registerRoutes(
     const task = await storage.getTask(Number(req.params.id));
     if (!task) return res.status(404).json({ message: "Task not found" });
     const exp = task.experimentId ? await storage.getExperiment(task.experimentId) : null;
+    const template = exp?.templateId ? await storage.getTemplate(exp.templateId) : null;
     const allAnnotations = await storage.getAnnotationsByTask(task.id);
     const initialAnnotation = allAnnotations.find(a => a.type === "initial") || null;
     const reviewAnnotation = allAnnotations.find(a => a.type === "review") || null;
-    // existingAnnotation = the annotation for the current task (used in workspace)
     const existingAnnotation = allAnnotations[0] || null;
-    res.json({ ...task, experiment: exp, existingAnnotation, initialAnnotation, reviewAnnotation, allAnnotations });
+    res.json({ ...task, experiment: exp, template, existingAnnotation, initialAnnotation, reviewAnnotation, allAnnotations });
   });
 
   // Adjudicate a task (admin final decision)

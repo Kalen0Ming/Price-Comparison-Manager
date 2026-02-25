@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import * as z from "zod";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -11,41 +12,51 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useExperiments, useCreateExperiment } from "@/hooks/use-experiments";
-import { Plus, Beaker, Calendar, Settings2 } from "lucide-react";
+import { Plus, Beaker, Calendar, Settings2, LayoutTemplate } from "lucide-react";
+import type { AnnotationTemplate } from "@shared/schema";
 
-// Form Schema
 const formSchema = z.object({
-  name: z.string().min(1, "Name is required"),
+  name: z.string().min(1, "实验名称不能为空"),
   description: z.string().optional(),
-  deadline: z.string().optional(), // Using string for native date input compatibility
+  deadline: z.string().optional(),
   enableReview: z.boolean().default(false),
   reviewRatio: z.coerce.number().min(0).max(100).default(0),
+  templateId: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  in_progress: "进行中",
+  completed: "已完成",
+  archived: "已归档",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-800",
+  in_progress: "bg-blue-100 text-blue-800",
+  completed: "bg-emerald-100 text-emerald-800",
+  archived: "bg-gray-100 text-gray-600",
+};
 
 export default function Experiments() {
   const { data: experiments = [], isLoading } = useExperiments();
   const createExperiment = useCreateExperiment();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [, setLocation] = useLocation();
+
+  const { data: templates = [] } = useQuery<AnnotationTemplate[]>({
+    queryKey: ["/api/templates"],
+  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -55,6 +66,7 @@ export default function Experiments() {
       deadline: "",
       enableReview: false,
       reviewRatio: 0,
+      templateId: "",
     }
   });
 
@@ -62,8 +74,9 @@ export default function Experiments() {
     createExperiment.mutate({
       ...data,
       deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
+      templateId: data.templateId ? Number(data.templateId) : null,
       status: "draft"
-    }, {
+    } as any, {
       onSuccess: () => {
         setIsDialogOpen(false);
         form.reset();
@@ -77,77 +90,100 @@ export default function Experiments() {
         <div>
           <h1 className="text-3xl font-display font-bold text-foreground flex items-center gap-3">
             <Beaker className="w-8 h-8 text-primary" />
-            Experiments
+            实验管理
           </h1>
-          <p className="text-muted-foreground mt-1">Manage annotation projects and configurations.</p>
+          <p className="text-muted-foreground mt-1">管理标注项目和配置。</p>
         </div>
 
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2 premium-shadow hover:shadow-lg hover:-translate-y-0.5 transition-all">
+            <Button className="gap-2 premium-shadow hover:shadow-lg hover:-translate-y-0.5 transition-all" data-testid="button-create-experiment">
               <Plus className="w-4 h-4" />
-              Create Experiment
+              新建实验
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[500px] border-border/50 premium-shadow">
             <DialogHeader>
-              <DialogTitle className="font-display text-xl">New Experiment</DialogTitle>
+              <DialogTitle className="font-display text-xl">新建实验</DialogTitle>
               <DialogDescription>
-                Configure a new price comparison annotation task.
+                配置新的价格比对标注实验。
               </DialogDescription>
             </DialogHeader>
 
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 pt-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Experiment Name *</Label>
-                <Input id="name" {...form.register("name")} placeholder="e.g. Q3 Electronics Price Match" />
+                <Label htmlFor="name">实验名称 *</Label>
+                <Input id="name" {...form.register("name")} placeholder="例：2024年Q3电子产品价格比对" data-testid="input-experiment-name" />
                 {form.formState.errors.name && (
                   <p className="text-sm text-destructive">{form.formState.errors.name.message}</p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea 
-                  id="description" 
-                  {...form.register("description")} 
-                  placeholder="Provide context for annotators..."
+                <Label htmlFor="description">实验描述</Label>
+                <Textarea
+                  id="description"
+                  {...form.register("description")}
+                  placeholder="为标注员提供说明和背景信息..."
                   className="resize-none h-20"
+                  data-testid="textarea-description"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="templateId" className="flex items-center gap-2">
+                  <LayoutTemplate className="w-4 h-4 text-muted-foreground" />
+                  标注模板
+                </Label>
+                <Select
+                  value={form.watch("templateId") || "__none__"}
+                  onValueChange={(val) => form.setValue("templateId", val === "__none__" ? "" : val)}
+                >
+                  <SelectTrigger data-testid="select-template">
+                    <SelectValue placeholder="不使用模板（默认价格比对）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— 不使用模板（默认价格比对）—</SelectItem>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="deadline" className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-muted-foreground" />
-                    Deadline
+                    截止时间
                   </Label>
-                  <Input id="deadline" type="date" {...form.register("deadline")} />
+                  <Input id="deadline" type="datetime-local" {...form.register("deadline")} data-testid="input-deadline" />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="reviewRatio" className="flex items-center gap-2">
                     <Settings2 className="w-4 h-4 text-muted-foreground" />
-                    Review Ratio (%)
+                    复核抽样比例 (%)
                   </Label>
-                  <Input id="reviewRatio" type="number" min="0" max="100" {...form.register("reviewRatio")} />
+                  <Input id="reviewRatio" type="number" min="0" max="100" {...form.register("reviewRatio")} data-testid="input-review-ratio" />
                 </div>
               </div>
 
               <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-slate-50">
                 <div className="space-y-0.5">
-                  <Label className="text-base">Enable Dual Review</Label>
-                  <p className="text-sm text-muted-foreground">Require second pass on ratio percentage</p>
+                  <Label className="text-base">启用双人复核</Label>
+                  <p className="text-sm text-muted-foreground">按比例抽取任务进行第二次复核</p>
                 </div>
-                <Switch 
+                <Switch
                   checked={form.watch("enableReview")}
                   onCheckedChange={(checked) => form.setValue("enableReview", checked)}
+                  data-testid="switch-enable-review"
                 />
               </div>
 
               <div className="flex justify-end pt-4">
-                <Button type="submit" disabled={createExperiment.isPending}>
-                  {createExperiment.isPending ? "Creating..." : "Create Experiment"}
+                <Button type="submit" disabled={createExperiment.isPending} data-testid="button-submit-experiment">
+                  {createExperiment.isPending ? "创建中..." : "创建实验"}
                 </Button>
               </div>
             </form>
@@ -160,46 +196,44 @@ export default function Experiments() {
           <Table>
             <TableHeader className="bg-slate-50/80">
               <TableRow>
-                <TableHead className="font-semibold text-slate-600">Name</TableHead>
-                <TableHead className="font-semibold text-slate-600">Status</TableHead>
-                <TableHead className="font-semibold text-slate-600">Review Config</TableHead>
-                <TableHead className="font-semibold text-slate-600">Created</TableHead>
-                <TableHead className="font-semibold text-slate-600">Deadline</TableHead>
-                <TableHead className="text-right font-semibold text-slate-600">Actions</TableHead>
+                <TableHead className="font-semibold text-slate-600">实验名称</TableHead>
+                <TableHead className="font-semibold text-slate-600">状态</TableHead>
+                <TableHead className="font-semibold text-slate-600">复核配置</TableHead>
+                <TableHead className="font-semibold text-slate-600">创建时间</TableHead>
+                <TableHead className="font-semibold text-slate-600">截止时间</TableHead>
+                <TableHead className="text-right font-semibold text-slate-600">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading experiments...</TableCell>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
                 </TableRow>
               ) : experiments.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No experiments created yet.</TableCell>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">暂无实验，点击"新建实验"开始。</TableCell>
                 </TableRow>
               ) : (
                 experiments.map((exp) => (
-                  <TableRow key={exp.id} className="hover:bg-slate-50/50 transition-colors">
+                  <TableRow key={exp.id} className="hover:bg-slate-50/50 transition-colors" data-testid={`row-experiment-${exp.id}`}>
                     <TableCell className="font-medium">{exp.name}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize
-                        ${exp.status === 'draft' ? 'bg-slate-100 text-slate-800' : 
-                          exp.status === 'in_progress' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                        {exp.status.replace('_', ' ')}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[exp.status] ?? 'bg-slate-100 text-slate-800'}`}>
+                        {STATUS_LABELS[exp.status] ?? exp.status}
                       </span>
                     </TableCell>
                     <TableCell>
                       {exp.enableReview ? (
-                        <span className="text-sm text-slate-600">{exp.reviewRatio}% sampling</span>
+                        <span className="text-sm text-slate-600">抽样 {exp.reviewRatio}%</span>
                       ) : (
-                        <span className="text-sm text-slate-400">Disabled</span>
+                        <span className="text-sm text-slate-400">未启用</span>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-slate-600">
-                      {exp.createdAt ? format(new Date(exp.createdAt), 'MMM d, yyyy') : '-'}
+                      {exp.createdAt ? format(new Date(exp.createdAt), 'yyyy-MM-dd') : '-'}
                     </TableCell>
                     <TableCell className="text-sm text-slate-600">
-                      {exp.deadline ? format(new Date(exp.deadline), 'MMM d, yyyy') : '-'}
+                      {exp.deadline ? format(new Date(exp.deadline), 'yyyy-MM-dd HH:mm') : '-'}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

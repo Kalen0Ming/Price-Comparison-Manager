@@ -12,7 +12,8 @@
 | 表名 | 说明 |
 |------|------|
 | users | 用户（admin/annotator 角色） |
-| experiments | 实验（含截止时间、复核设置） |
+| annotation_templates | 标注模板（展示字段+标注字段+判断字段） |
+| experiments | 实验（含截止时间、复核设置、templateId FK） |
 | tasks | 标注任务（含 assignedTo、assignedAt） |
 | annotations | 标注结果（支持 draft/initial/review 类型） |
 | notifications | 系统通知（info/warning/urgent） |

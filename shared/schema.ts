@@ -10,6 +10,16 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
 });
 
+export const annotationTemplates = pgTable("annotation_templates", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  displayFields: json("display_fields").notNull(),
+  annotationFields: json("annotation_fields").notNull(),
+  judgmentField: text("judgment_field").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const experiments = pgTable("experiments", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -19,18 +29,18 @@ export const experiments = pgTable("experiments", {
   enableReview: boolean("enable_review").default(false).notNull(),
   reviewRatio: integer("review_ratio").default(0).notNull(),
   status: text("status").notNull().default("draft"),
+  templateId: integer("template_id"),
 });
 
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull(),
   originalData: json("original_data").notNull(),
-  // status: pending → assigned → annotated → needs_review → completed
   status: text("status").notNull().default("pending"),
-  assignedTo: integer("assigned_to"),      // annotator user id
+  assignedTo: integer("assigned_to"),
   assignedAt: timestamp("assigned_at"),
-  reviewedBy: integer("reviewed_by"),       // reviewer user id
-  finalResult: json("final_result"),        // adjudicated final result
+  reviewedBy: integer("reviewed_by"),
+  finalResult: json("final_result"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -39,7 +49,7 @@ export const annotations = pgTable("annotations", {
   taskId: integer("task_id").notNull(),
   userId: integer("user_id").notNull(),
   result: json("result").notNull(),
-  type: text("type").notNull().default("initial"), // initial, review, draft
+  type: text("type").notNull().default("initial"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -48,7 +58,7 @@ export const notifications = pgTable("notifications", {
   userId: integer("user_id").notNull(),
   title: text("title").notNull(),
   message: text("message").notNull(),
-  type: text("type").notNull().default("info"), // info, warning, urgent
+  type: text("type").notNull().default("info"),
   isRead: boolean("is_read").notNull().default(false),
   experimentId: integer("experiment_id"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -61,12 +71,6 @@ export const logs = pgTable("logs", {
   details: text("details"),
   ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const systemSettings = pgTable("system_settings", {
-  key: text("key").primaryKey(),
-  value: text("value").notNull(),
-  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const apiConnectors = pgTable("api_connectors", {
@@ -83,8 +87,15 @@ export const apiConnectors = pgTable("api_connectors", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const systemSettings = pgTable("system_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
+export const insertTemplateSchema = createInsertSchema(annotationTemplates).omit({ id: true, createdAt: true });
 export const insertExperimentSchema = createInsertSchema(experiments).omit({ id: true, createdAt: true });
 export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true });
 export const insertAnnotationSchema = createInsertSchema(annotations).omit({ id: true, createdAt: true });
@@ -96,6 +107,9 @@ export const insertSystemSettingSchema = createInsertSchema(systemSettings).omit
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+
+export type AnnotationTemplate = typeof annotationTemplates.$inferSelect;
+export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 
 export type Experiment = typeof experiments.$inferSelect;
 export type InsertExperiment = z.infer<typeof insertExperimentSchema>;
@@ -131,6 +145,21 @@ export interface ExperimentStats {
   completedTasks: number;
   sampleTasks: Task[];
   fieldDistributions: Record<string, Record<string, number>>;
+}
+
+// Template field types (used in JSON columns)
+export interface DisplayField {
+  key: string;
+  label: string;
+}
+
+export interface AnnotationField {
+  key: string;
+  label: string;
+  type: "select" | "radio" | "text";
+  options?: string[];
+  required?: boolean;
+  isJudgment?: boolean;
 }
 
 // Enriched task for review workflow

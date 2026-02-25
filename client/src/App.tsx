@@ -19,6 +19,7 @@ import MyTasks from "./pages/my-tasks";
 import AnnotationWorkspace from "./pages/annotation-workspace";
 import ReviewTasks from "./pages/review-tasks";
 import ReviewDetail from "./pages/review-detail";
+import Templates from "./pages/templates";
 
 function Router() {
   return (
@@ -37,6 +38,7 @@ function Router() {
       <Route path="/annotation/:id" component={AnnotationWorkspace} />
       <Route path="/review-tasks" component={ReviewTasks} />
       <Route path="/review/:id" component={ReviewDetail} />
+      <Route path="/templates" component={Templates} />
       <Route component={NotFound} />
     </Switch>
   );

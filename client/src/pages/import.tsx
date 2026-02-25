@@ -7,19 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, FileSpreadsheet, ArrowRight, CheckCircle, ChevronRight, RotateCcw } from "lucide-react";
-import type { Experiment } from "@shared/schema";
-
-const TARGET_FIELDS = [
-  { key: "productA_name", label: "商品A 名称" },
-  { key: "productA_price", label: "商品A 价格" },
-  { key: "productA_source", label: "商品A 来源平台" },
-  { key: "productA_url", label: "商品A 链接" },
-  { key: "productB_name", label: "商品B 名称" },
-  { key: "productB_price", label: "商品B 价格" },
-  { key: "productB_source", label: "商品B 来源平台" },
-  { key: "productB_url", label: "商品B 链接" },
-];
+import { Upload, FileSpreadsheet, ArrowRight, CheckCircle, ChevronRight, RotateCcw, Info } from "lucide-react";
+import type { Experiment, AnnotationTemplate, DisplayField } from "@shared/schema";
 
 type Step = "upload" | "map" | "done";
 
@@ -27,7 +16,6 @@ interface ParseResult {
   columns: string[];
   preview: Record<string, string>[];
   totalRows: number;
-  rawRows?: Record<string, string>[];
 }
 
 export default function ImportPage() {
@@ -43,29 +31,16 @@ export default function ImportPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [createdCount, setCreatedCount] = useState(0);
 
-  const { data: experiments = [] } = useQuery<Experiment[]>({
-    queryKey: ["/api/experiments"],
-    queryFn: async () => {
-      const res = await fetch("/api/experiments");
-      return res.json();
-    },
-  });
+  const { data: experiments = [] } = useQuery<Experiment[]>({ queryKey: ["/api/experiments"] });
+  const { data: templates = [] } = useQuery<AnnotationTemplate[]>({ queryKey: ["/api/templates"] });
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/import/upload", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("文件解析失败");
-      return res.json() as Promise<ParseResult>;
-    },
-    onSuccess: (data) => {
-      setParseResult(data);
-    },
-    onError: (err: Error) => {
-      toast({ variant: "destructive", title: "上传失败", description: err.message });
-    },
-  });
+  const selectedExperiment = experiments.find(e => String(e.id) === selectedExperimentId);
+  const selectedTemplate = selectedExperiment?.templateId
+    ? templates.find(t => t.id === selectedExperiment.templateId)
+    : null;
+  const displayFields: DisplayField[] = selectedTemplate
+    ? (selectedTemplate.displayFields as DisplayField[])
+    : [];
 
   const createTasksMutation = useMutation({
     mutationFn: async () => {
@@ -75,7 +50,7 @@ export default function ImportPage() {
         body: JSON.stringify({
           experimentId: Number(selectedExperimentId),
           rows: rawRows,
-          mapping,
+          mapping: displayFields.length > 0 ? mapping : {},
         }),
       });
       if (!res.ok) throw new Error("创建任务失败");
@@ -98,15 +73,8 @@ export default function ImportPage() {
     const res = await fetch("/api/import/upload", { method: "POST", body: formData });
     if (!res.ok) { toast({ variant: "destructive", title: "上传失败" }); return; }
     const data = await res.json();
-
-    // Store full rows separately via re-parse (XLSX on client)
-    // We'll send the preview rows for mapping, and backend will use rows stored in session
-    // For simplicity: we store the preview data and let the user confirm
     setParseResult(data);
-    // We need to re-upload to get all rows - so we store file ref
-    // Actually: we send all rows in step 2 from a second read. 
-    // For now use the preview as sample, then send full rows via create-tasks.
-    // Let's read all rows by storing the file and re-reading
+
     const reader = new FileReader();
     reader.onload = async (e) => {
       const XLSX = await import("xlsx");
@@ -116,6 +84,17 @@ export default function ImportPage() {
       setRawRows(rows);
     };
     reader.readAsArrayBuffer(file);
+
+    // Auto-map if template display fields match column names
+    if (displayFields.length > 0 && data.columns) {
+      const autoMap: Record<string, string> = {};
+      displayFields.forEach(f => {
+        if (data.columns.includes(f.key)) autoMap[f.key] = f.key;
+        else if (data.columns.includes(f.label)) autoMap[f.key] = f.label;
+      });
+      setMapping(autoMap);
+    }
+
     setStep("map");
   };
 
@@ -145,7 +124,7 @@ export default function ImportPage() {
         <p className="text-muted-foreground mt-1">上传 CSV 或 Excel 文件，映射字段后批量生成标注任务。</p>
       </div>
 
-      {/* Steps Indicator */}
+      {/* Steps */}
       <div className="flex items-center gap-3 mb-8">
         {[
           { key: "upload", label: "1. 选择文件" },
@@ -171,7 +150,7 @@ export default function ImportPage() {
               <CardTitle>选择实验</CardTitle>
               <CardDescription>选择将数据导入到哪个实验</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               <Select value={selectedExperimentId} onValueChange={setSelectedExperimentId}>
                 <SelectTrigger data-testid="select-experiment">
                   <SelectValue placeholder="请选择实验..." />
@@ -184,6 +163,24 @@ export default function ImportPage() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {selectedTemplate && (
+                <div className="flex items-start gap-2 text-xs bg-blue-50 border border-blue-100 rounded-lg p-3 text-blue-800">
+                  <Info className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold mb-1">使用模板：{selectedTemplate.name}</p>
+                    <p>展示字段（{displayFields.length} 个）：{displayFields.map(f => f.label).join("、") || "无"}</p>
+                    <p className="mt-0.5 text-blue-600">导入时可将 CSV 列映射到这些字段，其他列也会一并保存。</p>
+                  </div>
+                </div>
+              )}
+
+              {selectedExperiment && !selectedTemplate && (
+                <div className="flex items-start gap-2 text-xs bg-muted rounded-lg p-3 text-muted-foreground">
+                  <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                  此实验未绑定标注模板，所有 CSV 列将原样导入。
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -200,12 +197,12 @@ export default function ImportPage() {
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => selectedExperimentId ? fileInputRef.current?.click() : toast({ variant: "destructive", title: "请先选择实验" })}
                 data-testid="dropzone-upload"
               >
                 <FileSpreadsheet className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-sm font-medium text-foreground mb-1">拖放文件到此处，或点击选择文件</p>
-                <p className="text-xs text-muted-foreground">CSV / Excel (.xlsx, .xls)</p>
+                <p className="text-xs text-muted-foreground">CSV / Excel (.xlsx, .xls)，无格式限制</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -226,12 +223,10 @@ export default function ImportPage() {
       {step === "map" && parseResult && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">
-                已解析文件：共 <span className="font-semibold text-foreground">{parseResult.totalRows}</span> 行数据，
-                检测到 <span className="font-semibold text-foreground">{parseResult.columns.length}</span> 个字段
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              已解析文件：共 <span className="font-semibold text-foreground">{parseResult.totalRows}</span> 行数据，
+              检测到 <span className="font-semibold text-foreground">{parseResult.columns.length}</span> 个字段
+            </p>
             <Button variant="outline" size="sm" onClick={reset} className="gap-2">
               <RotateCcw className="w-4 h-4" />
               重新上传
@@ -239,48 +234,69 @@ export default function ImportPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Field mapping */}
             <Card>
               <CardHeader>
                 <CardTitle>字段映射</CardTitle>
-                <CardDescription>将文件中的列映射到系统标准字段（可选）</CardDescription>
+                <CardDescription>
+                  {displayFields.length > 0
+                    ? "将文件中的列映射到模板展示字段（可选），未映射字段也会原样保存"
+                    : "所有文件列将原样保存到任务数据中，无需手动映射"}
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {TARGET_FIELDS.map((target) => (
-                    <div key={target.key} className="flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{target.label}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{target.key}</p>
+                {displayFields.length > 0 ? (
+                  <div className="space-y-3">
+                    {displayFields.map((target) => (
+                      <div key={target.key} className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{target.label}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{target.key}</p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1">
+                          <Select
+                            value={mapping[target.key] || "__none__"}
+                            onValueChange={(val) => {
+                              setMapping(prev => {
+                                const next = { ...prev };
+                                if (val === "__none__") { delete next[target.key]; } else { next[target.key] = val; }
+                                return next;
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs" data-testid={`select-map-${target.key}`}>
+                              <SelectValue placeholder="不映射" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">— 不映射 —</SelectItem>
+                              {parseResult.columns.map((col) => (
+                                <SelectItem key={col} value={col}>{col}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      <div className="flex-1">
-                        <Select
-                          value={mapping[target.key] || "__none__"}
-                          onValueChange={(val) => {
-                            setMapping(prev => {
-                              const next = { ...prev };
-                              if (val === "__none__") { delete next[target.key]; } else { next[target.key] = val; }
-                              return next;
-                            });
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-xs" data-testid={`select-map-${target.key}`}>
-                            <SelectValue placeholder="不映射" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">— 不映射 —</SelectItem>
-                            {parseResult.columns.map((col) => (
-                              <SelectItem key={col} value={col}>{col}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    ))}
+                    <div className="mt-2 pt-2 border-t">
+                      <p className="text-xs text-muted-foreground">
+                        已映射 {Object.keys(mapping).length}/{displayFields.length} 个字段。
+                        文件中其余 {parseResult.columns.length} 列也将一并保存。
+                      </p>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-sm text-muted-foreground space-y-2">
+                    <p>此实验未绑定模板，所有字段将原样导入。</p>
+                    <div className="flex flex-wrap gap-1 justify-center mt-3">
+                      {parseResult.columns.map(c => <Badge key={c} variant="outline" className="text-xs">{c}</Badge>)}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
+            {/* Preview */}
             <Card>
               <CardHeader>
                 <CardTitle>数据预览</CardTitle>
@@ -332,7 +348,7 @@ export default function ImportPage() {
           </div>
           <h2 className="text-2xl font-bold text-foreground mb-2">导入成功</h2>
           <p className="text-muted-foreground mb-6">
-            已为实验批量创建 <span className="font-semibold text-foreground">{createdCount}</span> 条标注任务。
+            已批量创建 <span className="font-semibold text-foreground">{createdCount}</span> 条标注任务。
           </p>
           <div className="flex gap-3 justify-center">
             <Button variant="outline" onClick={reset} className="gap-2">

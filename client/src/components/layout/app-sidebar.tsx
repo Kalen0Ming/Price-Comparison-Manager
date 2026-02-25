@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import {
   Users, FlaskConical, CheckSquare, Tags, Activity, LayoutDashboard,
-  LogOut, Upload, Link2, ClipboardList, ShieldCheck,
+  LogOut, Upload, Link2, ClipboardList, ShieldCheck, LayoutTemplate,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -25,9 +25,16 @@ const annotatorNavItems = [
 ];
 
 const dataItems = [
+  { title: "标注模板", url: "/templates", icon: LayoutTemplate },
   { title: "数据导入", url: "/import", icon: Upload },
   { title: "API 连接器", url: "/connector", icon: Link2 },
 ];
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "管理员",
+  reviewer: "复核员",
+  annotator: "标注员",
+};
 
 export function AppSidebar() {
   const [location] = useLocation();
@@ -55,29 +62,23 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive =
-                  location === item.url ||
-                  (item.url === "/experiments" && location.startsWith("/experiments/") && !location.startsWith("/experiments/") ) ||
-                  (item.url === "/review-tasks" && location.startsWith("/review/"));
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.url}
-                      tooltip={item.title}
-                      className={location === item.url
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                    >
-                      <Link href={item.url} className="flex items-center gap-3">
-                        <item.icon className="w-5 h-5" />
-                        <span className="font-medium">{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url || (item.url === "/review-tasks" && location.startsWith("/review/"))}
+                    tooltip={item.title}
+                    className={location === item.url || (item.url === "/review-tasks" && location.startsWith("/review/"))
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                  >
+                    <Link href={item.url} className="flex items-center gap-3">
+                      <item.icon className="w-5 h-5" />
+                      <span className="font-medium">{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -120,7 +121,7 @@ export function AppSidebar() {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-medium text-sidebar-foreground truncate">{user.username}</p>
-              <p className="text-xs text-sidebar-foreground/50 capitalize">{user.role}</p>
+              <p className="text-xs text-sidebar-foreground/50">{ROLE_LABELS[user.role] ?? user.role}</p>
             </div>
           </div>
         )}

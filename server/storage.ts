@@ -1,7 +1,8 @@
 import { db } from "./db";
 import {
-  users, experiments, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
+  users, annotationTemplates, experiments, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
   type User, type InsertUser, type UpdateUserRequest,
+  type AnnotationTemplate, type InsertTemplate,
   type Experiment, type InsertExperiment, type UpdateExperimentRequest,
   type Task, type InsertTask,
   type Annotation, type InsertAnnotation,
@@ -14,6 +15,13 @@ import {
 import { eq, isNull, and, inArray, or } from "drizzle-orm";
 
 export interface IStorage {
+  // Templates
+  getTemplates(): Promise<AnnotationTemplate[]>;
+  getTemplate(id: number): Promise<AnnotationTemplate | undefined>;
+  createTemplate(t: InsertTemplate): Promise<AnnotationTemplate>;
+  updateTemplate(id: number, updates: Partial<InsertTemplate>): Promise<AnnotationTemplate>;
+  deleteTemplate(id: number): Promise<void>;
+
   // Users
   getUsers(): Promise<User[]>;
   getUser(id: number): Promise<User | undefined>;
@@ -310,6 +318,29 @@ export class DatabaseStorage implements IStorage {
 
   async deleteConnector(id: number): Promise<void> {
     await db.delete(apiConnectors).where(eq(apiConnectors.id, id));
+  }
+
+  async getTemplates(): Promise<AnnotationTemplate[]> {
+    return await db.select().from(annotationTemplates);
+  }
+
+  async getTemplate(id: number): Promise<AnnotationTemplate | undefined> {
+    const [t] = await db.select().from(annotationTemplates).where(eq(annotationTemplates.id, id));
+    return t;
+  }
+
+  async createTemplate(t: InsertTemplate): Promise<AnnotationTemplate> {
+    const [newT] = await db.insert(annotationTemplates).values(t).returning();
+    return newT;
+  }
+
+  async updateTemplate(id: number, updates: Partial<InsertTemplate>): Promise<AnnotationTemplate> {
+    const [updated] = await db.update(annotationTemplates).set(updates as any).where(eq(annotationTemplates.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTemplate(id: number): Promise<void> {
+    await db.delete(annotationTemplates).where(eq(annotationTemplates.id, id));
   }
 
   async getSettings(): Promise<SystemSetting[]> {
