@@ -9,17 +9,20 @@ import {
 } from "@/components/ui/sidebar";
 import { useLogout, getCurrentUser } from "@/hooks/use-auth";
 
-const adminNavItems = [
+const adminOnlyItems = [
   { title: "仪表盘", url: "/dashboard", icon: LayoutDashboard },
-  { title: "实验管理", url: "/experiments", icon: FlaskConical },
-  { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
-  { title: "任务列表", url: "/tasks", icon: CheckSquare },
-  { title: "标注结果", url: "/annotations", icon: Tags },
   { title: "用户管理", url: "/users", icon: Users },
   { title: "系统日志", url: "/logs", icon: Activity },
 ];
 
-const annotatorNavItems = [
+const managerItems = [
+  { title: "实验管理", url: "/experiments", icon: FlaskConical },
+  { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
+  { title: "任务列表", url: "/tasks", icon: CheckSquare },
+  { title: "标注结果", url: "/annotations", icon: Tags },
+];
+
+const annotatorItems = [
   { title: "我的任务", url: "/my-tasks", icon: ClipboardList },
   { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
 ];
@@ -32,58 +35,126 @@ const dataItems = [
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "管理员",
-  reviewer: "复核员",
+  publisher: "实验发布者",
   annotator: "标注员",
+  reviewer: "复核员",
 };
 
 export function AppSidebar() {
   const [location] = useLocation();
   const logout = useLogout();
   const user = getCurrentUser();
-  const isAdmin = user?.role === "admin" || user?.role === "reviewer";
+  const role = user?.role ?? "annotator";
+  const isAdmin = role === "admin";
+  const isManager = role === "admin" || role === "publisher" || role === "reviewer";
 
-  const navItems = isAdmin ? adminNavItems : annotatorNavItems;
+  const isActive = (url: string) =>
+    location === url ||
+    (url === "/review-tasks" && location.startsWith("/review/")) ||
+    (url === "/experiments" && location.startsWith("/experiments/"));
 
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarContent>
         <SidebarGroup>
           <div className="p-4 mb-2">
-            <h2 className="text-2xl font-bold text-sidebar-primary-foreground flex items-center gap-2">
-              <FlaskConical className="w-6 h-6 text-primary" />
-              <span>LabelFlow</span>
+            <h2 className="text-lg font-bold text-sidebar-primary-foreground leading-tight">
+              数据标注实验平台
             </h2>
             <p className="text-xs text-sidebar-foreground/60 mt-1">
-              {isAdmin ? "管理员工作台" : "标注员工作台"}
+              {ROLE_LABELS[role] ?? role}
             </p>
           </div>
-          <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
-            {isAdmin ? "平台管理" : "我的工作"}
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.url || (item.url === "/review-tasks" && location.startsWith("/review/"))}
-                    tooltip={item.title}
-                    className={location === item.url || (item.url === "/review-tasks" && location.startsWith("/review/"))
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                  >
-                    <Link href={item.url} className="flex items-center gap-3">
-                      <item.icon className="w-5 h-5" />
-                      <span className="font-medium">{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
+
+          {isAdmin && (
+            <>
+              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
+                系统管理
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {adminOnlyItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.url)}
+                        tooltip={item.title}
+                        className={isActive(item.url)
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                      >
+                        <Link href={item.url} className="flex items-center gap-3">
+                          <item.icon className="w-5 h-5" />
+                          <span className="font-medium">{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </>
+          )}
+
+          {isManager && (
+            <>
+              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs mt-2">
+                实验管理
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {managerItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.url)}
+                        tooltip={item.title}
+                        className={isActive(item.url)
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                      >
+                        <Link href={item.url} className="flex items-center gap-3">
+                          <item.icon className="w-5 h-5" />
+                          <span className="font-medium">{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </>
+          )}
+
+          {!isManager && (
+            <>
+              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
+                我的工作
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {annotatorItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.url)}
+                        tooltip={item.title}
+                        className={isActive(item.url)
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
+                      >
+                        <Link href={item.url} className="flex items-center gap-3">
+                          <item.icon className="w-5 h-5" />
+                          <span className="font-medium">{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </>
+          )}
         </SidebarGroup>
 
-        {isAdmin && (
+        {isManager && (
           <SidebarGroup>
             <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
               数据接入
@@ -94,9 +165,9 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton
                       asChild
-                      isActive={location === item.url}
+                      isActive={isActive(item.url)}
                       tooltip={item.title}
-                      className={location === item.url
+                      className={isActive(item.url)
                         ? "bg-sidebar-accent text-sidebar-accent-foreground"
                         : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
                     >
@@ -121,7 +192,7 @@ export function AppSidebar() {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-medium text-sidebar-foreground truncate">{user.username}</p>
-              <p className="text-xs text-sidebar-foreground/50">{ROLE_LABELS[user.role] ?? user.role}</p>
+              <p className="text-xs text-sidebar-foreground/50">{ROLE_LABELS[role] ?? role}</p>
             </div>
           </div>
         )}

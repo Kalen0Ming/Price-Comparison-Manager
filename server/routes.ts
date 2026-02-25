@@ -135,11 +135,42 @@ export async function registerRoutes(
 
   app.post(api.users.create.path, async (req, res) => {
     try {
-      const input = api.users.create.input.parse(req.body);
+      const schema = z.object({
+        username: z.string().min(1),
+        password: z.string().min(6),
+        email: z.string().email().optional().default(""),
+        role: z.enum(["admin", "publisher", "annotator"]).default("annotator"),
+      });
+      const input = schema.parse(req.body);
+      const existing = await storage.getUserByUsername(input.username);
+      if (existing) return res.status(400).json({ message: "用户名已存在" });
       res.status(201).json(await storage.createUser(input));
+    } catch (e: any) {
+      if (e?.message) return res.status(400).json({ message: e.message });
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.put("/api/users/:id", async (req, res) => {
+    try {
+      const schema = z.object({
+        username: z.string().min(1).optional(),
+        password: z.string().min(6).optional(),
+        email: z.string().optional(),
+        role: z.enum(["admin", "publisher", "annotator"]).optional(),
+      });
+      const input = schema.parse(req.body);
+      const updated = await storage.updateUser(Number(req.params.id), input);
+      if (!updated) return res.status(404).json({ message: "User not found" });
+      res.json(updated);
     } catch {
       res.status(400).json({ message: "Invalid input" });
     }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    await storage.deleteUser(Number(req.params.id));
+    res.json({ success: true });
   });
 
   // --- Experiments ---

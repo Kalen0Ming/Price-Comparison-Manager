@@ -25,9 +25,9 @@ export default function Login() {
           <div className="w-16 h-16 bg-gradient-to-br from-primary to-primary/70 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-primary/25">
             <FlaskConical className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-display font-bold text-foreground">LabelFlow</h1>
-          <p className="text-muted-foreground mt-2 text-center">
-            价格比对标注实验管理平台
+          <h1 className="text-2xl font-display font-bold text-foreground text-center leading-tight">数据标注实验平台</h1>
+          <p className="text-muted-foreground mt-2 text-center text-sm">
+            企业内部标注实验管理系统
           </p>
         </div>
 
