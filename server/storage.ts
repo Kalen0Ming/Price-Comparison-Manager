@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  users, experiments, tasks, annotations, notifications, logs, apiConnectors,
+  users, experiments, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
   type User, type InsertUser, type UpdateUserRequest,
   type Experiment, type InsertExperiment, type UpdateExperimentRequest,
   type Task, type InsertTask,
@@ -8,6 +8,7 @@ import {
   type Notification, type InsertNotification,
   type Log, type InsertLog,
   type ApiConnector, type InsertApiConnector, type UpdateApiConnectorRequest,
+  type SystemSetting,
   type ExperimentStats,
 } from "@shared/schema";
 import { eq, isNull, and, inArray, or } from "drizzle-orm";
@@ -62,6 +63,11 @@ export interface IStorage {
   createConnector(conn: InsertApiConnector): Promise<ApiConnector>;
   updateConnector(id: number, updates: UpdateApiConnectorRequest): Promise<ApiConnector>;
   deleteConnector(id: number): Promise<void>;
+
+  // System Settings
+  getSettings(): Promise<SystemSetting[]>;
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<SystemSetting>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -304,6 +310,28 @@ export class DatabaseStorage implements IStorage {
 
   async deleteConnector(id: number): Promise<void> {
     await db.delete(apiConnectors).where(eq(apiConnectors.id, id));
+  }
+
+  async getSettings(): Promise<SystemSetting[]> {
+    return await db.select().from(systemSettings);
+  }
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const [row] = await db.select().from(systemSettings).where(eq(systemSettings.key, key));
+    return row?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<SystemSetting> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      const [updated] = await db.update(systemSettings)
+        .set({ value, updatedAt: new Date() })
+        .where(eq(systemSettings.key, key))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(systemSettings).values({ key, value }).returning();
+    return created;
   }
 }
 

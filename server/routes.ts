@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import multer from "multer";
 import * as XLSX from "xlsx";
+import archiver from "archiver";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
@@ -281,7 +282,7 @@ export async function registerRoutes(
     try {
       const userId = z.coerce.number().parse(req.query.userId);
       const myTasks = await storage.getMyTasks(userId);
-      const expIds = [...new Set(myTasks.map(t => t.experimentId))];
+      const expIds = Array.from(new Set(myTasks.map(t => t.experimentId)));
       const expMap: Record<number, any> = {};
       for (const eid of expIds) {
         const exp = await storage.getExperiment(eid);
@@ -299,7 +300,7 @@ export async function registerRoutes(
     try {
       const userId = z.coerce.number().parse(req.query.userId);
       const reviewTasks = await storage.getMyReviewTasks(userId);
-      const expIds = [...new Set(reviewTasks.map(t => t.experimentId))];
+      const expIds = Array.from(new Set(reviewTasks.map(t => t.experimentId)));
       const expMap: Record<number, any> = {};
       for (const eid of expIds) {
         const exp = await storage.getExperiment(eid);
@@ -483,6 +484,199 @@ export async function registerRoutes(
       res.json({ fetched: rows.length, created });
     } catch (err: any) {
       res.status(500).json({ message: err.message || "Failed to fetch from external API" });
+    }
+  });
+
+  // --- Stats Overview ---
+  app.get("/api/stats/overview", async (req, res) => {
+    try {
+      const [allExperiments, allTasks, allAnnotations, allUsers] = await Promise.all([
+        storage.getExperiments(),
+        storage.getTasks(),
+        storage.getAnnotations(),
+        storage.getUsers(),
+      ]);
+
+      const experimentProgress = allExperiments.map(exp => {
+        const expTasks = allTasks.filter(t => t.experimentId === exp.id);
+        const total = expTasks.length;
+        const done = expTasks.filter(t => ["annotated", "needs_review", "completed"].includes(t.status)).length;
+        return { id: exp.id, name: exp.name, status: exp.status, total, done, progress: total > 0 ? Math.round((done / total) * 100) : 0 };
+      });
+
+      const initialAnnotations = allAnnotations.filter(a => a.type === "initial");
+      const now = Date.now();
+      const dayMs = 86400000;
+      const weekMs = 7 * dayMs;
+
+      const userEfficiency = allUsers.filter(u => u.role === "annotator").map(user => {
+        const userAnns = initialAnnotations.filter(a => a.userId === user.id);
+        const sorted = [...userAnns].sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
+        const daysActive = sorted[0] ? Math.max(1, Math.ceil((now - new Date(sorted[0].createdAt!).getTime()) / dayMs)) : 1;
+        const lastWeek = userAnns.filter(a => (now - new Date(a.createdAt!).getTime()) < weekMs).length;
+        return {
+          userId: user.id, username: user.username,
+          totalAnnotated: userAnns.length,
+          perDay: Number((userAnns.length / daysActive).toFixed(1)),
+          perWeek: lastWeek,
+        };
+      });
+
+      const reviewedTaskIds = Array.from(new Set(allAnnotations.filter(a => a.type === "review").map(a => a.taskId)));
+      const accuracyByUser: Record<number, { total: number; matched: number }> = {};
+      for (const taskId of reviewedTaskIds) {
+        const taskAnns = allAnnotations.filter(a => a.taskId === taskId);
+        const initialAnn = taskAnns.find(a => a.type === "initial");
+        const reviewAnn = taskAnns.find(a => a.type === "review");
+        if (!initialAnn || !reviewAnn) continue;
+        const uid = initialAnn.userId;
+        if (!accuracyByUser[uid]) accuracyByUser[uid] = { total: 0, matched: 0 };
+        accuracyByUser[uid].total++;
+        if (!detectConflict(initialAnn.result as Record<string, unknown>, reviewAnn.result as Record<string, unknown>)) {
+          accuracyByUser[uid].matched++;
+        }
+      }
+      const accuracyStats = Object.entries(accuracyByUser).map(([uid, s]) => {
+        const user = allUsers.find(u => u.id === Number(uid));
+        return {
+          userId: Number(uid), username: user?.username || "未知",
+          totalReviewed: s.total, matched: s.matched,
+          accuracy: s.total > 0 ? Math.round((s.matched / s.total) * 100) : 0,
+        };
+      }).sort((a, b) => b.accuracy - a.accuracy);
+
+      res.json({ experimentProgress, userEfficiency, accuracyStats });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to load stats" });
+    }
+  });
+
+  // --- System Settings ---
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const rows = await storage.getSettings();
+      const masked = rows.map(r => ({
+        key: r.key,
+        value: r.key.toLowerCase().includes("key") || r.key.toLowerCase().includes("secret") ? "••••••••" : r.value,
+        hasValue: Boolean(r.value),
+      }));
+      res.json(masked);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load settings" });
+    }
+  });
+
+  app.put("/api/settings/:key", async (req, res) => {
+    try {
+      const { value } = z.object({ value: z.string() }).parse(req.body);
+      const setting = await storage.setSetting(req.params.key, value);
+      res.json({ key: setting.key, hasValue: Boolean(setting.value) });
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  app.get("/api/settings/shufang-status", async (req, res) => {
+    const apiUrl = await storage.getSetting("shufang_api_url");
+    const apiKey = await storage.getSetting("shufang_api_key");
+    res.json({ configured: Boolean(apiUrl && apiKey), hasUrl: Boolean(apiUrl), hasKey: Boolean(apiKey) });
+  });
+
+  // --- Archive Experiment ---
+  app.post("/api/experiments/:id/archive", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const [exp, expTasks, allAnnotations, allUsers] = await Promise.all([
+        storage.getExperiment(expId),
+        storage.getTasks(expId),
+        storage.getAnnotations(),
+        storage.getUsers(),
+      ]);
+      if (!exp) return res.status(404).json({ message: "Experiment not found" });
+
+      const taskIds = new Set(expTasks.map(t => t.id));
+      const expAnnotations = allAnnotations.filter(a => taskIds.has(a.taskId));
+
+      const userMap: Record<number, string> = {};
+      allUsers.forEach(u => (userMap[u.id] = u.username));
+
+      const toCSV = (rows: Record<string, unknown>[]): string => {
+        if (rows.length === 0) return "";
+        const keys = Object.keys(rows[0]);
+        const header = keys.join(",");
+        const lines = rows.map(row =>
+          keys.map(k => {
+            const v = row[k];
+            const str = v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+            return `"${str.replace(/"/g, '""')}"`;
+          }).join(",")
+        );
+        return [header, ...lines].join("\n");
+      };
+
+      const tasksRows = expTasks.map(t => ({
+        id: t.id, experimentId: t.experimentId, status: t.status,
+        assignedTo: t.assignedTo ? userMap[t.assignedTo] || t.assignedTo : "",
+        reviewedBy: t.reviewedBy ? userMap[t.reviewedBy] || t.reviewedBy : "",
+        originalData: JSON.stringify(t.originalData),
+        finalResult: t.finalResult ? JSON.stringify(t.finalResult) : "",
+        createdAt: t.createdAt,
+      }));
+      const annotationsRows = expAnnotations.map(a => ({
+        id: a.id, taskId: a.taskId,
+        userId: userMap[a.userId] || a.userId,
+        type: a.type, result: JSON.stringify(a.result), createdAt: a.createdAt,
+      }));
+
+      const zipChunks: Buffer[] = [];
+      const arc = archiver("zip", { zlib: { level: 9 } });
+      arc.on("data", (chunk: Buffer) => zipChunks.push(chunk));
+      const zipReady = new Promise<Buffer>((resolve, reject) => {
+        arc.on("end", () => resolve(Buffer.concat(zipChunks)));
+        arc.on("error", reject);
+      });
+
+      arc.append(Buffer.from(JSON.stringify(exp, null, 2), "utf8"), { name: "experiment.json" });
+      arc.append(Buffer.from(toCSV(tasksRows as any), "utf8"), { name: "tasks.csv" });
+      arc.append(Buffer.from(toCSV(annotationsRows as any), "utf8"), { name: "annotations.csv" });
+      arc.finalize();
+      const zipBuffer = await zipReady;
+
+      await storage.updateExperiment(expId, { status: "archived" } as any);
+
+      let shufangStatus = "not_configured";
+      const shufangUrl = await storage.getSetting("shufang_api_url");
+      const shufangKey = await storage.getSetting("shufang_api_key");
+      if (shufangUrl && shufangKey) {
+        try {
+          const uploadRes = await fetch(shufangUrl, {
+            method: "POST",
+            headers: {
+              "X-API-Key": shufangKey,
+              "Content-Type": "application/zip",
+              "X-Experiment-Id": String(expId),
+              "X-Experiment-Name": exp.name,
+              "X-Filename": `experiment_${expId}.zip`,
+            },
+            body: zipBuffer,
+          });
+          shufangStatus = uploadRes.ok ? "success" : `error_${uploadRes.status}`;
+        } catch (e: any) {
+          shufangStatus = `upload_error: ${e.message}`;
+        }
+      }
+
+      res.set({
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="experiment_${expId}_${Date.now()}.zip"`,
+        "X-Shufang-Status": shufangStatus,
+        "Access-Control-Expose-Headers": "X-Shufang-Status",
+      });
+      res.send(zipBuffer);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Archive failed" });
     }
   });
 

@@ -63,6 +63,12 @@ export const logs = pgTable("logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const systemSettings = pgTable("system_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const apiConnectors = pgTable("api_connectors", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
@@ -85,6 +91,7 @@ export const insertAnnotationSchema = createInsertSchema(annotations).omit({ id:
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, createdAt: true });
 export const insertApiConnectorSchema = createInsertSchema(apiConnectors).omit({ id: true, createdAt: true, lastFetchedAt: true });
+export const insertSystemSettingSchema = createInsertSchema(systemSettings).omit({ updatedAt: true });
 
 // Types
 export type User = typeof users.$inferSelect;
@@ -107,6 +114,8 @@ export type InsertLog = z.infer<typeof insertLogSchema>;
 
 export type ApiConnector = typeof apiConnectors.$inferSelect;
 export type InsertApiConnector = z.infer<typeof insertApiConnectorSchema>;
+
+export type SystemSetting = typeof systemSettings.$inferSelect;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UpdateExperimentRequest = Partial<InsertExperiment>;

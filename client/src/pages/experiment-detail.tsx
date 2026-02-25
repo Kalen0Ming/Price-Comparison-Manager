@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight } from "lucide-react";
+import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight, Archive, Download, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import type { Experiment, ExperimentStats, User, Task, Annotation } from "@shared/schema";
 
@@ -245,6 +245,114 @@ function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Tas
   );
 }
 
+function ArchiveDialog({ expId, expName, expStatus }: { expId: number; expName: string; expStatus: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [shufangResult, setShufangResult] = useState<string | null>(null);
+
+  const handleArchive = async () => {
+    setIsArchiving(true);
+    setShufangResult(null);
+    try {
+      const res = await fetch(`/api/experiments/${expId}/archive`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "归档失败" }));
+        throw new Error(err.message);
+      }
+      const sfStatus = res.headers.get("X-Shufang-Status") || "not_configured";
+      setShufangResult(sfStatus);
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `experiment_${expId}_${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments"] });
+
+      const sfLabel = sfStatus === "success"
+        ? "已成功同步至数坊"
+        : sfStatus === "not_configured"
+        ? "数坊集成未配置，仅本地下载"
+        : `数坊同步失败：${sfStatus}`;
+      toast({ title: "实验已归档并下载 ZIP", description: sfLabel });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "归档失败", description: e.message });
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant="outline"
+          className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+          disabled={expStatus === "archived"}
+          data-testid="button-archive-experiment"
+        >
+          <Archive className="w-4 h-4" />
+          {expStatus === "archived" ? "已归档" : "归档实验"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Archive className="w-5 h-5 text-amber-600" />
+            归档实验
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <p className="font-semibold mb-1">将对实验「{expName}」执行以下操作：</p>
+            <ul className="list-disc list-inside space-y-1 text-amber-700">
+              <li>将实验状态标记为"已归档"</li>
+              <li>导出全部任务数据为 <code>tasks.csv</code></li>
+              <li>导出全部标注数据为 <code>annotations.csv</code></li>
+              <li>包含实验配置 <code>experiment.json</code></li>
+              <li>打包成 ZIP 自动下载</li>
+              <li>如已配置数坊集成，自动同步上传</li>
+            </ul>
+          </div>
+
+          {shufangResult && (
+            <div className={`rounded-lg p-3 text-sm ${shufangResult === "success" ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : shufangResult === "not_configured" ? "bg-slate-50 border border-slate-200 text-slate-600" : "bg-red-50 border border-red-200 text-red-700"}`}>
+              <strong>数坊同步：</strong>
+              {shufangResult === "success" && " 已成功上传至数坊数据仓库"}
+              {shufangResult === "not_configured" && " 数坊集成未配置，可在仪表盘顶部配置"}
+              {!["success", "not_configured"].includes(shufangResult) && ` ${shufangResult}`}
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={() => setOpen(false)} disabled={isArchiving}>
+              取消
+            </Button>
+            <Button
+              className="flex-1 gap-2 bg-amber-600 hover:bg-amber-700"
+              onClick={handleArchive}
+              disabled={isArchiving}
+              data-testid="button-confirm-archive"
+            >
+              {isArchiving ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />归档中...</>
+              ) : (
+                <><Download className="w-4 h-4" />确认归档并下载</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 type ReviewQueueItem = Task & {
   initialAnnotation: Annotation | null;
   reviewAnnotation: Annotation | null;
@@ -331,10 +439,15 @@ export default function ExperimentDetail() {
                 </p>
               )}
             </div>
-            {/* Assignment Controls */}
+            {/* Assignment & Archive Controls */}
             <div className="flex gap-2 flex-wrap">
               <ManualAssignDialog expId={expId} tasks={allTasks} users={users} />
               <RandomAssignDialog expId={expId} tasks={allTasks} users={users} />
+              <ArchiveDialog
+                expId={expId}
+                expName={experiment?.name || ""}
+                expStatus={experiment?.status || ""}
+              />
             </div>
           </div>
         )}

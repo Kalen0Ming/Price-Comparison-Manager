@@ -61,6 +61,31 @@
 - 自动比较 `is_same_product`、`price_comparison`、`quality_comparison` 三个核心字段
 - 任何字段不一致即标记 `hasConflict: true`，在复核队列表格中显示"有分歧"警告
 
+### 统计看板（仪表盘页面）
+管理员仪表盘完全重设计，含三大统计模块：
+1. **实验完成进度**：水平柱状图展示每个实验的任务完成百分比（已完成/总任务数）
+2. **人均标注效率表格**：累计完成任务数、日均标注量、近7天产出
+3. **个人准确率排行**：对比初标与复标是否一致，生成准确率百分比，带进度条可视化（绿/黄/红根据准确率分级）
+- API：`GET /api/stats/overview`
+
+### 数坊集成配置
+- 仪表盘右上角 "数坊集成配置" 按钮
+- 配置 API 地址（`shufang_api_url`）和 API 密钥（`shufang_api_key`）
+- 配置保存至 `system_settings` 数据库表（密钥在 GET 接口中自动脱敏为 `••••••••`）
+- API：`GET /api/settings`、`PUT /api/settings/:key`、`GET /api/settings/shufang-status`
+
+### 实验归档功能（实验详情页）
+- 实验详情页头部新增 "归档实验" 按钮（当实验已归档则禁用）
+- 点击后弹出确认对话框，执行以下操作：
+  1. 导出 `tasks.csv`（含任务状态、分配信息）
+  2. 导出 `annotations.csv`（含所有类型的标注记录）
+  3. 导出 `experiment.json`（实验配置）
+  4. 三个文件打包为 ZIP 自动下载到本地
+  5. 若数坊已配置，自动 POST 上传至数坊 API（请求头 `X-API-Key`、`Content-Type: application/zip`）
+  6. 实验状态更新为 `archived`
+- 对话框内显示数坊同步状态（成功/未配置/失败）
+- API：`POST /api/experiments/:id/archive`
+
 ## 后台定时任务
 - 每小时检查 in_progress 实验的 deadline
 - 距截止 ≤24h 生成 warning 通知，≤1h 生成 urgent 通知
