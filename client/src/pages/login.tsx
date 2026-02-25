@@ -3,7 +3,7 @@ import { useLogin } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FlaskConical, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -22,9 +22,10 @@ export default function Login() {
 
       <div className="w-full max-w-md p-8 glass-panel rounded-2xl relative z-10">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-primary to-primary/70 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-primary/25">
-            <FlaskConical className="w-8 h-8 text-white" />
-          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" className="w-16 h-16 mb-4 drop-shadow-lg">
+            <rect width="40" height="40" rx="10" fill="#2563EB"/>
+            <path d="M10 21L17 28L30 13" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
           <h1 className="text-2xl font-display font-bold text-foreground text-center leading-tight">数据标注实验平台</h1>
           <p className="text-muted-foreground mt-2 text-center text-sm">
             企业内部标注实验管理系统
