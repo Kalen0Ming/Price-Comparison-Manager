@@ -9,22 +9,6 @@ import {
 } from "@/components/ui/sidebar";
 import { useLogout, getCurrentUser } from "@/hooks/use-auth";
 
-const adminOnlyItems = [
-  { title: "仪表盘", url: "/dashboard", icon: LayoutDashboard },
-  { title: "用户管理", url: "/users", icon: Users },
-];
-
-const managerItems = [
-  { title: "实验管理", url: "/experiments", icon: FlaskConical },
-  { title: "分配批次管理", url: "/tasks", icon: CheckSquare },
-];
-
-const dataItems = [
-  { title: "标注模板", url: "/templates", icon: LayoutTemplate },
-  { title: "数据导入", url: "/import", icon: Upload },
-  { title: "API 连接器", url: "/connector", icon: Link2 },
-];
-
 const ROLE_LABELS: Record<string, string> = {
   admin: "管理员",
   publisher: "实验发布者",
@@ -42,57 +26,73 @@ export function AppSidebar() {
 
   const isActive = (url: string) =>
     location === url ||
-    (url === "/my-tasks" && (location.startsWith("/review") || location.startsWith("/my-tasks"))) ||
+    (url === "/my-tasks" && (location.startsWith("/review") || location.startsWith("/annotation/"))) ||
     (url === "/experiments" && location.startsWith("/experiments/"));
+
+  const menuBtn = (url: string) =>
+    isActive(url)
+      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+      : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50";
+
+  function NavItem({ title, url, icon: Icon }: { title: string; url: string; icon: React.ElementType }) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuButton asChild isActive={isActive(url)} tooltip={title} className={menuBtn(url)}>
+          <Link href={url} className="flex items-center gap-3">
+            <Icon className="w-5 h-5" />
+            <span className="font-medium">{title}</span>
+          </Link>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  }
 
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarContent>
         <SidebarGroup>
+          {/* Logo */}
           <div className="p-4 mb-2 flex items-center gap-3">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" className="w-9 h-9 shrink-0">
               <rect width="40" height="40" rx="10" fill="#2563EB"/>
               <path d="M10 21L17 28L30 13" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             <div>
-              <h2 className="text-sm font-bold leading-tight text-sidebar-foreground">
-                数据标注实验平台
-              </h2>
-              <p className="text-xs mt-0.5 text-sidebar-foreground/60">
-                {ROLE_LABELS[role] ?? role}
-              </p>
+              <h2 className="text-sm font-bold leading-tight text-sidebar-foreground">数据标注实验平台</h2>
+              <p className="text-xs mt-0.5 text-sidebar-foreground/60">{ROLE_LABELS[role] ?? role}</p>
             </div>
           </div>
 
-          {isAdmin && (
+          {/* 系统管理 - always show 仪表盘; 用户管理 only for admin */}
+          <>
+            <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
+              系统管理
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <NavItem title="仪表盘" url="/dashboard" icon={LayoutDashboard} />
+                {isAdmin && <NavItem title="用户管理" url="/users" icon={Users} />}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </>
+
+          {/* 数据接入 - managers only */}
+          {isManager && (
             <>
-              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
-                系统管理
+              <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs mt-2">
+                数据接入
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {adminOnlyItems.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.url)}
-                        tooltip={item.title}
-                        className={isActive(item.url)
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                      >
-                        <Link href={item.url} className="flex items-center gap-3">
-                          <item.icon className="w-5 h-5" />
-                          <span className="font-medium">{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  <NavItem title="标注模板" url="/templates" icon={LayoutTemplate} />
+                  <NavItem title="数据导入" url="/import" icon={Upload} />
+                  <NavItem title="API 连接器" url="/connector" icon={Link2} />
                 </SidebarMenu>
               </SidebarGroupContent>
             </>
           )}
 
+          {/* 实验管理 - managers only */}
           {isManager && (
             <>
               <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs mt-2">
@@ -100,82 +100,25 @@ export function AppSidebar() {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {managerItems.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.url)}
-                        tooltip={item.title}
-                        className={isActive(item.url)
-                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                      >
-                        <Link href={item.url} className="flex items-center gap-3">
-                          <item.icon className="w-5 h-5" />
-                          <span className="font-medium">{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  <NavItem title="实验管理" url="/experiments" icon={FlaskConical} />
+                  <NavItem title="分配批次管理" url="/tasks" icon={CheckSquare} />
                 </SidebarMenu>
               </SidebarGroupContent>
             </>
           )}
 
+          {/* 我的工作 - all users */}
           <>
             <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs mt-2">
               我的工作
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive("/my-tasks")}
-                    tooltip="我的任务"
-                    className={isActive("/my-tasks")
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                  >
-                    <Link href="/my-tasks" className="flex items-center gap-3">
-                      <ClipboardList className="w-5 h-5" />
-                      <span className="font-medium">我的任务</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <NavItem title="我的任务" url="/my-tasks" icon={ClipboardList} />
               </SidebarMenu>
             </SidebarGroupContent>
           </>
         </SidebarGroup>
-
-        {isManager && (
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-sidebar-foreground/50 uppercase tracking-wider text-xs">
-              数据接入
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {dataItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive(item.url)}
-                      tooltip={item.title}
-                      className={isActive(item.url)
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                    >
-                      <Link href={item.url} className="flex items-center gap-3">
-                        <item.icon className="w-5 h-5" />
-                        <span className="font-medium">{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
       </SidebarContent>
 
       <SidebarFooter className="p-4">

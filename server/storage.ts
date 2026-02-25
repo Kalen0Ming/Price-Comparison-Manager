@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  users, annotationTemplates, experiments, taskBatches, tasks, annotations, notifications, logs, apiConnectors, systemSettings,
+  users, annotationTemplates, experiments, taskBatches, tasks, annotations, notifications, logs, apiConnectors, systemSettings, userGroups, roleRequests,
   type User, type InsertUser, type UpdateUserRequest,
   type AnnotationTemplate, type InsertTemplate,
   type Experiment, type InsertExperiment, type UpdateExperimentRequest,
@@ -12,6 +12,8 @@ import {
   type ApiConnector, type InsertApiConnector, type UpdateApiConnectorRequest,
   type SystemSetting,
   type ExperimentStats,
+  type UserGroup, type InsertUserGroup,
+  type RoleRequest, type InsertRoleRequest,
 } from "@shared/schema";
 import { eq, isNull, and, inArray, or, gte, lte, like } from "drizzle-orm";
 
@@ -76,6 +78,19 @@ export interface IStorage {
 
   // Logs
   getLogs(): Promise<Log[]>;
+
+  // User Groups
+  getUserGroups(): Promise<UserGroup[]>;
+  getUserGroup(id: number): Promise<UserGroup | undefined>;
+  createUserGroup(group: InsertUserGroup): Promise<UserGroup>;
+  updateUserGroup(id: number, data: Partial<InsertUserGroup>): Promise<UserGroup>;
+  deleteUserGroup(id: number): Promise<void>;
+
+  // Role Requests
+  getRoleRequests(): Promise<RoleRequest[]>;
+  getRoleRequestsByUser(userId: number): Promise<RoleRequest[]>;
+  createRoleRequest(req: InsertRoleRequest): Promise<RoleRequest>;
+  updateRoleRequest(id: number, data: Partial<RoleRequest>): Promise<RoleRequest>;
 
   // Connectors
   getConnectors(): Promise<ApiConnector[]>;
@@ -472,6 +487,47 @@ export class DatabaseStorage implements IStorage {
     }
     const [created] = await db.insert(systemSettings).values({ key, value }).returning();
     return created;
+  }
+
+  async getUserGroups(): Promise<UserGroup[]> {
+    return await db.select().from(userGroups).orderBy(userGroups.createdAt);
+  }
+
+  async getUserGroup(id: number): Promise<UserGroup | undefined> {
+    const [g] = await db.select().from(userGroups).where(eq(userGroups.id, id));
+    return g;
+  }
+
+  async createUserGroup(group: InsertUserGroup): Promise<UserGroup> {
+    const [g] = await db.insert(userGroups).values(group).returning();
+    return g;
+  }
+
+  async updateUserGroup(id: number, data: Partial<InsertUserGroup>): Promise<UserGroup> {
+    const [g] = await db.update(userGroups).set(data as any).where(eq(userGroups.id, id)).returning();
+    return g;
+  }
+
+  async deleteUserGroup(id: number): Promise<void> {
+    await db.delete(userGroups).where(eq(userGroups.id, id));
+  }
+
+  async getRoleRequests(): Promise<RoleRequest[]> {
+    return await db.select().from(roleRequests).orderBy(roleRequests.createdAt);
+  }
+
+  async getRoleRequestsByUser(userId: number): Promise<RoleRequest[]> {
+    return await db.select().from(roleRequests).where(eq(roleRequests.userId, userId)).orderBy(roleRequests.createdAt);
+  }
+
+  async createRoleRequest(req: InsertRoleRequest): Promise<RoleRequest> {
+    const [r] = await db.insert(roleRequests).values(req).returning();
+    return r;
+  }
+
+  async updateRoleRequest(id: number, data: Partial<RoleRequest>): Promise<RoleRequest> {
+    const [r] = await db.update(roleRequests).set(data as any).where(eq(roleRequests.id, id)).returning();
+    return r;
   }
 }
 

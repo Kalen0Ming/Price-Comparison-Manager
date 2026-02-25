@@ -1,22 +1,26 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  FlaskConical, Users, CheckSquare, Tags, TrendingUp, Award, Settings2, Eye, EyeOff
+  FlaskConical, Users, CheckSquare, Tags, TrendingUp, Award, Settings2, Eye, EyeOff, Filter, X,
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 import { useExperiments } from "@/hooks/use-experiments";
 import { useUsers } from "@/hooks/use-users";
 import { useTasks } from "@/hooks/use-tasks";
 import { useAnnotations } from "@/hooks/use-annotations";
+import { getCurrentUser } from "@/hooks/use-auth";
+import { format, subDays } from "date-fns";
+import type { User } from "@shared/schema";
 
 interface OverviewStats {
   experimentProgress: Array<{
@@ -87,12 +91,7 @@ function ShufangConfigDialog() {
               <Label>数坊 API 地址</Label>
               {status?.hasUrl && <span className="text-xs text-emerald-600 font-medium">✓ 已配置</span>}
             </div>
-            <Input
-              placeholder="https://api.shufang.example.com/upload"
-              value={apiUrl}
-              onChange={e => setApiUrl(e.target.value)}
-              data-testid="input-shufang-url"
-            />
+            <Input placeholder="https://api.shufang.example.com/upload" value={apiUrl} onChange={e => setApiUrl(e.target.value)} data-testid="input-shufang-url" />
             <p className="text-xs text-muted-foreground">留空则保持不变（当前：{status?.hasUrl ? "已配置" : "未配置"}）</p>
           </div>
           <div className="space-y-1.5">
@@ -101,30 +100,14 @@ function ShufangConfigDialog() {
               {status?.hasKey && <span className="text-xs text-emerald-600 font-medium">✓ 已配置</span>}
             </div>
             <div className="relative">
-              <Input
-                type={showKey ? "text" : "password"}
-                placeholder="输入 API 密钥..."
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                className="pr-10"
-                data-testid="input-shufang-key"
-              />
-              <button
-                type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowKey(!showKey)}
-              >
+              <Input type={showKey ? "text" : "password"} placeholder="输入 API 密钥..." value={apiKey} onChange={e => setApiKey(e.target.value)} className="pr-10" data-testid="input-shufang-key" />
+              <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setShowKey(!showKey)}>
                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
             <p className="text-xs text-muted-foreground">密钥保存后不会明文展示。（当前：{status?.hasKey ? "已配置" : "未配置"}）</p>
           </div>
-          <Button
-            className="w-full"
-            disabled={(!apiUrl && !apiKey) || saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-            data-testid="button-save-shufang"
-          >
+          <Button className="w-full" disabled={(!apiUrl && !apiKey) || saveMutation.isPending} onClick={() => saveMutation.mutate()} data-testid="button-save-shufang">
             {saveMutation.isPending ? "保存中..." : "保存配置"}
           </Button>
         </div>
@@ -147,53 +130,86 @@ function AccuracyBar({ value }: { value: number }) {
 
 const CHART_COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6"];
 
+const DEFAULT_DATE_FROM = format(subDays(new Date(), 30), "yyyy-MM-dd");
+const DEFAULT_DATE_TO = format(new Date(), "yyyy-MM-dd");
+
 export default function Dashboard() {
+  const currentUser = getCurrentUser();
+  const isAnnotator = currentUser?.role === "annotator";
+  const isAdmin = currentUser?.role === "admin";
+
   const { data: experiments = [] } = useExperiments();
   const { data: users = [] } = useUsers();
   const { data: tasks = [] } = useTasks();
   const { data: annotations = [] } = useAnnotations();
 
-  const { data: overview } = useQuery<OverviewStats>({
-    queryKey: ["/api/stats/overview"],
+  const [dateFrom, setDateFrom] = useState(DEFAULT_DATE_FROM);
+  const [dateTo, setDateTo] = useState(DEFAULT_DATE_TO);
+  const [annotatorId, setAnnotatorId] = useState<string>("all");
+  const [experimentCode, setExperimentCode] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const annotators = (users as User[]).filter(u => u.role === "annotator");
+
+  const buildParams = useCallback(() => {
+    const p = new URLSearchParams();
+    if (dateFrom) p.set("dateFrom", new Date(dateFrom).toISOString());
+    if (dateTo) p.set("dateTo", new Date(dateTo + "T23:59:59").toISOString());
+    if (annotatorId && annotatorId !== "all") p.set("annotatorId", annotatorId);
+    if (experimentCode) p.set("experimentCode", experimentCode);
+    if (isAnnotator && currentUser?.id) {
+      p.set("selfOnly", "true");
+      p.set("userId", String(currentUser.id));
+    }
+    return p.toString();
+  }, [dateFrom, dateTo, annotatorId, experimentCode, isAnnotator, currentUser?.id]);
+
+  const { data: overview, isLoading: overviewLoading } = useQuery<OverviewStats>({
+    queryKey: ["/api/stats/overview", dateFrom, dateTo, annotatorId, experimentCode, currentUser?.id],
     queryFn: async () => {
-      const r = await fetch("/api/stats/overview");
+      const r = await fetch(`/api/stats/overview?${buildParams()}`);
       return r.json();
     },
     refetchInterval: 30000,
   });
 
+  const hasActiveFilters = dateFrom !== DEFAULT_DATE_FROM || dateTo !== DEFAULT_DATE_TO || annotatorId !== "all" || experimentCode !== "";
+
+  const resetFilters = () => {
+    setDateFrom(DEFAULT_DATE_FROM);
+    setDateTo(DEFAULT_DATE_TO);
+    setAnnotatorId("all");
+    setExperimentCode("");
+  };
+
+  // Summary stats - annotators see their own data
+  const myAnnotations = annotations.filter((a: any) => isAnnotator ? a.userId === currentUser?.id : true);
+  const myTasks = tasks.filter((t: any) => isAnnotator ? t.assignedTo === currentUser?.id : true);
+
   const summaryStats = [
     {
       title: "实验总数",
       value: experiments.length,
-      sub: `${experiments.filter(e => e.status === "in_progress").length} 个进行中`,
-      icon: FlaskConical,
-      color: "text-indigo-500",
-      bg: "bg-indigo-500/10",
+      sub: `${experiments.filter((e: any) => e.status === "in_progress").length} 个进行中`,
+      icon: FlaskConical, color: "text-indigo-500", bg: "bg-indigo-500/10",
     },
     {
-      title: "任务总量",
-      value: tasks.length,
-      sub: `${tasks.filter(t => t.status === "completed").length} 个已完成`,
-      icon: CheckSquare,
-      color: "text-amber-500",
-      bg: "bg-amber-500/10",
+      title: isAnnotator ? "我的任务" : "任务总量",
+      value: myTasks.length,
+      sub: `${myTasks.filter((t: any) => t.status === "completed").length} 个已完成`,
+      icon: CheckSquare, color: "text-amber-500", bg: "bg-amber-500/10",
     },
     {
-      title: "标注提交数",
-      value: annotations.filter(a => a.type === "initial").length,
-      sub: `${annotations.filter(a => a.type === "review").length} 条复核记录`,
-      icon: Tags,
-      color: "text-emerald-500",
-      bg: "bg-emerald-500/10",
+      title: isAnnotator ? "我的标注数" : "标注提交数",
+      value: myAnnotations.filter((a: any) => a.type === "initial").length,
+      sub: `${myAnnotations.filter((a: any) => a.type === "review").length} 条复核记录`,
+      icon: Tags, color: "text-emerald-500", bg: "bg-emerald-500/10",
     },
     {
-      title: "团队成员",
-      value: users.length,
-      sub: `${users.filter(u => u.role === "annotator").length} 名标注员`,
-      icon: Users,
-      color: "text-purple-500",
-      bg: "bg-purple-500/10",
+      title: isAnnotator ? "团队规模" : "团队成员",
+      value: isAnnotator ? (users as User[]).length : (users as User[]).length,
+      sub: `${(users as User[]).filter(u => u.role === "annotator").length} 名标注员`,
+      icon: Users, color: "text-purple-500", bg: "bg-purple-500/10",
     },
   ];
 
@@ -209,12 +225,95 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-display font-bold text-foreground">统计看板</h1>
-          <p className="text-muted-foreground mt-1">实验进度、人员效率与标注质量概览</p>
+          <h1 className="text-3xl font-display font-bold text-foreground">
+            {isAnnotator ? "我的数据看板" : "统计看板"}
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            {isAnnotator ? "您的标注进度与准确率概览" : "实验进度、人员效率与标注质量概览"}
+          </p>
         </div>
-        <ShufangConfigDialog />
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showFilters ? "default" : "outline"}
+            size="sm"
+            className="gap-2"
+            onClick={() => setShowFilters(!showFilters)}
+            data-testid="button-toggle-filters"
+          >
+            <Filter className="w-4 h-4" />
+            筛选
+            {hasActiveFilters && <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />}
+          </Button>
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" onClick={resetFilters} data-testid="button-reset-filters">
+              <X className="w-3.5 h-3.5" />重置
+            </Button>
+          )}
+          {isAdmin && <ShufangConfigDialog />}
+        </div>
       </div>
 
+      {/* Filter Panel */}
+      {showFilters && (
+        <Card className="mb-6 border-border/50">
+          <CardContent className="pt-5 pb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">实验发布开始日期</Label>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  data-testid="input-filter-date-from"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">实验发布截止日期</Label>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  data-testid="input-filter-date-to"
+                />
+              </div>
+              {!isAnnotator && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">标注员</Label>
+                  <Select value={annotatorId} onValueChange={setAnnotatorId}>
+                    <SelectTrigger data-testid="select-filter-annotator">
+                      <SelectValue placeholder="全部标注员" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部标注员</SelectItem>
+                      {annotators.map(u => (
+                        <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">实验名称 / 编码搜索</Label>
+                <Input
+                  placeholder="输入实验名称或编码..."
+                  value={experimentCode}
+                  onChange={e => setExperimentCode(e.target.value)}
+                  data-testid="input-filter-exp-code"
+                />
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <p className="text-xs text-muted-foreground mt-3">
+                当前筛选：{dateFrom} 至 {dateTo}
+                {annotatorId && annotatorId !== "all" && ` · 标注员 #${annotatorId}`}
+                {experimentCode && ` · 搜索"${experimentCode}"`}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Summary Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         {summaryStats.map((stat, i) => (
           <Card key={i} className="border-border/50 shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -239,18 +338,18 @@ export default function Dashboard() {
               <TrendingUp className="w-5 h-5 text-indigo-500" />
               实验完成进度
             </CardTitle>
-            <CardDescription>各实验任务完成百分比</CardDescription>
+            <CardDescription>
+              {hasActiveFilters ? "按筛选条件显示实验进度" : "近30天各实验任务完成百分比"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {!overview || progressChartData.length === 0 ? (
+            {overviewLoading ? (
+              <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">加载中...</div>
+            ) : !overview || progressChartData.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">暂无实验数据</div>
             ) : (
               <ResponsiveContainer width="100%" height={Math.max(180, progressChartData.length * 52)}>
-                <BarChart
-                  data={progressChartData}
-                  layout="vertical"
-                  margin={{ top: 4, right: 48, left: 4, bottom: 4 }}
-                >
+                <BarChart data={progressChartData} layout="vertical" margin={{ top: 4, right: 48, left: 4, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
                   <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
@@ -281,12 +380,16 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 font-display">
               <Users className="w-5 h-5 text-purple-500" />
-              人均标注效率
+              {isAnnotator ? "我的标注效率" : "人均标注效率"}
             </CardTitle>
-            <CardDescription>每位标注员的累计产出与近7天数据</CardDescription>
+            <CardDescription>
+              {isAnnotator ? "您的累计产出与近7天数据" : "每位标注员的累计产出与近7天数据"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            {!overview || overview.userEfficiency.length === 0 ? (
+            {overviewLoading ? (
+              <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">加载中...</div>
+            ) : !overview || overview.userEfficiency.length === 0 ? (
               <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">暂无标注员数据</div>
             ) : (
               <div className="overflow-x-auto">
@@ -313,9 +416,7 @@ export default function Dashboard() {
                         <td className="py-2.5 text-right font-semibold">{u.totalAnnotated}</td>
                         <td className="py-2.5 text-right text-muted-foreground">{u.perDay}</td>
                         <td className="py-2.5 text-right">
-                          <span className={`font-medium ${u.perWeek > 0 ? "text-indigo-600" : "text-muted-foreground"}`}>
-                            {u.perWeek}
-                          </span>
+                          <span className={`font-medium ${u.perWeek > 0 ? "text-indigo-600" : "text-muted-foreground"}`}>{u.perWeek}</span>
                         </td>
                       </tr>
                     ))}
@@ -331,18 +432,20 @@ export default function Dashboard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 font-display">
             <Award className="w-5 h-5 text-amber-500" />
-            个人标注准确率
+            {isAnnotator ? "我的准确率" : "个人标注准确率"}
           </CardTitle>
           <CardDescription>
-            仅统计已开启复核的实验。准确率 = 初标与复标一致的比例（核心字段：是否同款、价格对比、质量对比）
+            仅统计已开启复核的实验。准确率 = 初标与复标一致的比例
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {!overview || overview.accuracyStats.length === 0 ? (
+          {overviewLoading ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">加载中...</div>
+          ) : !overview || overview.accuracyStats.length === 0 ? (
             <div className="py-10 text-center">
               <Award className="w-10 h-10 mx-auto mb-3 text-slate-200" />
               <p className="text-muted-foreground text-sm">暂无复核数据</p>
-              <p className="text-muted-foreground text-xs mt-1">当实验开启复核功能且标注员的标注被抽中复核后，准确率数据将在此显示。</p>
+              <p className="text-muted-foreground text-xs mt-1">当实验开启复核功能且标注被抽中复核后，准确率数据将在此显示。</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -370,9 +473,7 @@ export default function Dashboard() {
                       </td>
                       <td className="py-3 text-right text-muted-foreground">{u.totalReviewed}</td>
                       <td className="py-3 text-right font-medium">{u.matched}</td>
-                      <td className="py-3 pl-4">
-                        <AccuracyBar value={u.accuracy} />
-                      </td>
+                      <td className="py-3 pl-4"><AccuracyBar value={u.accuracy} /></td>
                     </tr>
                   ))}
                 </tbody>

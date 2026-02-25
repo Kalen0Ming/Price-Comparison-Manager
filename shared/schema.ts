@@ -109,6 +109,25 @@ export const systemSettings = pgTable("system_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const userGroups = pgTable("user_groups", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  userIds: json("user_ids").notNull().$type<number[]>(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const roleRequests = pgTable("role_requests", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  requestedRole: text("requested_role").notNull(),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertTemplateSchema = createInsertSchema(annotationTemplates).omit({ id: true, createdAt: true });
@@ -120,6 +139,8 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
 export const insertLogSchema = createInsertSchema(logs).omit({ id: true, createdAt: true });
 export const insertApiConnectorSchema = createInsertSchema(apiConnectors).omit({ id: true, createdAt: true, lastFetchedAt: true });
 export const insertSystemSettingSchema = createInsertSchema(systemSettings).omit({ updatedAt: true });
+export const insertUserGroupSchema = createInsertSchema(userGroups).omit({ id: true, createdAt: true });
+export const insertRoleRequestSchema = createInsertSchema(roleRequests).omit({ id: true, createdAt: true, reviewedAt: true });
 
 // Types
 export type User = typeof users.$inferSelect;
@@ -150,6 +171,12 @@ export type ApiConnector = typeof apiConnectors.$inferSelect;
 export type InsertApiConnector = z.infer<typeof insertApiConnectorSchema>;
 
 export type SystemSetting = typeof systemSettings.$inferSelect;
+
+export type UserGroup = typeof userGroups.$inferSelect;
+export type InsertUserGroup = z.infer<typeof insertUserGroupSchema>;
+
+export type RoleRequest = typeof roleRequests.$inferSelect;
+export type InsertRoleRequest = z.infer<typeof insertRoleRequestSchema>;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UpdateExperimentRequest = Partial<InsertExperiment>;

@@ -806,19 +806,49 @@ export async function registerRoutes(
         storage.getUsers(),
       ]);
 
-      const experimentProgress = allExperiments.map(exp => {
-        const expTasks = allTasks.filter(t => t.experimentId === exp.id);
+      const now = Date.now();
+      const dayMs = 86400000;
+      const weekMs = 7 * dayMs;
+
+      // Filters
+      const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom as string) : new Date(now - 30 * dayMs);
+      const dateTo = req.query.dateTo ? new Date(req.query.dateTo as string) : new Date(now + dayMs);
+      const annotatorId = req.query.annotatorId ? Number(req.query.annotatorId) : null;
+      const expSearch = req.query.experimentCode ? String(req.query.experimentCode).toLowerCase() : null;
+      const selfOnly = req.query.selfOnly === "true" ? Number(req.query.selfOnly === "true" ? req.query.userId : null) : null;
+      const userId = req.query.userId ? Number(req.query.userId) : null;
+
+      // Filter experiments by date range and code search
+      const filteredExperiments = allExperiments.filter(exp => {
+        const created = new Date(exp.createdAt!);
+        if (created < dateFrom || created > dateTo) return false;
+        if (expSearch && !exp.name.toLowerCase().includes(expSearch) && !(exp.code || "").toLowerCase().includes(expSearch)) return false;
+        return true;
+      });
+      const filteredExpIds = new Set(filteredExperiments.map(e => e.id));
+
+      // Filter tasks to those in filtered experiments
+      const filteredTasks = allTasks.filter(t => filteredExpIds.has(t.experimentId));
+      const filteredTaskIds = new Set(filteredTasks.map(t => t.id));
+
+      // Filter annotations to those in filtered tasks
+      const filteredAnnotations = allAnnotations.filter(a => filteredTaskIds.has(a.taskId));
+
+      const experimentProgress = filteredExperiments.map(exp => {
+        const expTasks = filteredTasks.filter(t => t.experimentId === exp.id);
         const total = expTasks.length;
         const done = expTasks.filter(t => ["annotated", "needs_review", "completed"].includes(t.status)).length;
         return { id: exp.id, name: exp.name, status: exp.status, total, done, progress: total > 0 ? Math.round((done / total) * 100) : 0 };
       });
 
-      const initialAnnotations = allAnnotations.filter(a => a.type === "initial");
-      const now = Date.now();
-      const dayMs = 86400000;
-      const weekMs = 7 * dayMs;
+      const initialAnnotations = filteredAnnotations.filter(a => a.type === "initial");
 
-      const userEfficiency = allUsers.filter(u => u.role === "annotator").map(user => {
+      // Filter annotators
+      let annotatorPool = allUsers.filter(u => u.role === "annotator");
+      if (annotatorId) annotatorPool = annotatorPool.filter(u => u.id === annotatorId);
+      if (userId && req.query.selfOnly === "true") annotatorPool = annotatorPool.filter(u => u.id === userId);
+
+      const userEfficiency = annotatorPool.map(user => {
         const userAnns = initialAnnotations.filter(a => a.userId === user.id);
         const sorted = [...userAnns].sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
         const daysActive = sorted[0] ? Math.max(1, Math.ceil((now - new Date(sorted[0].createdAt!).getTime()) / dayMs)) : 1;
@@ -831,13 +861,15 @@ export async function registerRoutes(
         };
       });
 
-      const reviewedTaskIds = Array.from(new Set(allAnnotations.filter(a => a.type === "review").map(a => a.taskId)));
+      const reviewedTaskIds = Array.from(new Set(filteredAnnotations.filter(a => a.type === "review").map(a => a.taskId)));
       const accuracyByUser: Record<number, { total: number; matched: number }> = {};
       for (const taskId of reviewedTaskIds) {
-        const taskAnns = allAnnotations.filter(a => a.taskId === taskId);
+        const taskAnns = filteredAnnotations.filter(a => a.taskId === taskId);
         const initialAnn = taskAnns.find(a => a.type === "initial");
         const reviewAnn = taskAnns.find(a => a.type === "review");
         if (!initialAnn || !reviewAnn) continue;
+        if (annotatorId && initialAnn.userId !== annotatorId) continue;
+        if (userId && req.query.selfOnly === "true" && initialAnn.userId !== userId) continue;
         const uid = initialAnn.userId;
         if (!accuracyByUser[uid]) accuracyByUser[uid] = { total: 0, matched: 0 };
         accuracyByUser[uid].total++;
@@ -858,6 +890,107 @@ export async function registerRoutes(
     } catch (err) {
       console.error(err);
       res.status(500).json({ message: "Failed to load stats" });
+    }
+  });
+
+  // --- User Groups ---
+  app.get("/api/user-groups", async (_req, res) => {
+    try {
+      const groups = await storage.getUserGroups();
+      res.json(groups);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load user groups" });
+    }
+  });
+
+  app.post("/api/user-groups", async (req, res) => {
+    try {
+      const { name, description, userIds } = req.body;
+      if (!name) return res.status(400).json({ message: "Name required" });
+      const group = await storage.createUserGroup({ name, description, userIds: userIds || [] });
+      res.json(group);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to create user group" });
+    }
+  });
+
+  app.put("/api/user-groups/:id", async (req, res) => {
+    try {
+      const { name, description, userIds } = req.body;
+      const group = await storage.updateUserGroup(Number(req.params.id), { name, description, userIds });
+      res.json(group);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update user group" });
+    }
+  });
+
+  app.delete("/api/user-groups/:id", async (req, res) => {
+    try {
+      await storage.deleteUserGroup(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete user group" });
+    }
+  });
+
+  // --- Role Requests ---
+  app.get("/api/role-requests", async (req, res) => {
+    try {
+      const userId = req.query.userId ? Number(req.query.userId) : null;
+      const requests = userId ? await storage.getRoleRequestsByUser(userId) : await storage.getRoleRequests();
+      const allUsers = await storage.getUsers();
+      const userMap: Record<number, string> = {};
+      allUsers.forEach(u => (userMap[u.id] = u.username));
+      const enriched = requests.map(r => ({ ...r, username: userMap[r.userId] || "未知" }));
+      res.json(enriched);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load role requests" });
+    }
+  });
+
+  app.post("/api/role-requests", async (req, res) => {
+    try {
+      const { userId, requestedRole, reason } = req.body;
+      if (!userId || !requestedRole) return res.status(400).json({ message: "userId and requestedRole required" });
+      // Check if user already has a pending request
+      const existing = await storage.getRoleRequestsByUser(userId);
+      const pending = existing.find(r => r.status === "pending");
+      if (pending) return res.status(400).json({ message: "已有待审核的权限申请" });
+      const request = await storage.createRoleRequest({ userId, requestedRole, reason, status: "pending", reviewedBy: null, reviewedAt: null } as any);
+      res.json(request);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to create role request" });
+    }
+  });
+
+  app.put("/api/role-requests/:id", async (req, res) => {
+    try {
+      const { status, reviewedBy } = req.body;
+      if (!["approved", "rejected"].includes(status)) return res.status(400).json({ message: "Invalid status" });
+      const request = await storage.getRoleRequests().then(rs => rs.find(r => r.id === Number(req.params.id)));
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      const updated = await storage.updateRoleRequest(Number(req.params.id), {
+        status, reviewedBy, reviewedAt: new Date(),
+      } as any);
+      // If approved, update user role
+      if (status === "approved") {
+        await storage.updateUser(request.userId, { role: request.requestedRole } as any);
+      }
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update role request" });
+    }
+  });
+
+  // --- Assign reviewer to task ---
+  app.put("/api/tasks/:id/reviewer", async (req, res) => {
+    try {
+      const taskId = Number(req.params.id);
+      const { reviewedBy } = req.body;
+      const updated = await storage.updateTask(taskId, { reviewedBy } as any);
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to assign reviewer" });
     }
   });
 

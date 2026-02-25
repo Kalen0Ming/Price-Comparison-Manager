@@ -37,9 +37,7 @@ export function useLogin() {
     onSuccess: (user) => {
       queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
       toast({ title: "登录成功", description: `欢迎回来，${user.username}！` });
-      if (user.role === "annotator") {
-        setLocation("/my-tasks");
-      } else if (user.role === "publisher") {
+      if (user.role === "publisher") {
         setLocation("/experiments");
       } else {
         setLocation("/dashboard");
