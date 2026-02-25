@@ -20,7 +20,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useExperiments, useCreateExperiment } from "@/hooks/use-experiments";
-import { Plus, Beaker, Calendar, Settings2, LayoutTemplate, Hash, Flag } from "lucide-react";
+import { Plus, Beaker, Calendar, Settings2, LayoutTemplate, Flag } from "lucide-react";
 import type { AnnotationTemplate } from "@shared/schema";
 
 const PRIORITY_OPTS = [
@@ -31,7 +31,6 @@ const PRIORITY_OPTS = [
 
 const formSchema = z.object({
   name: z.string().min(1, "实验名称不能为空"),
-  code: z.string().optional(),
   priority: z.enum(["P1", "P2", "P3"]).default("P2"),
   description: z.string().optional(),
   deadline: z.string().optional(),
@@ -70,7 +69,6 @@ export default function Experiments() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
-      code: "",
       priority: "P2",
       description: "",
       deadline: "",
@@ -83,7 +81,6 @@ export default function Experiments() {
   const onSubmit = (data: FormValues) => {
     createExperiment.mutate({
       ...data,
-      code: data.code || undefined,
       deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
       templateId: data.templateId ? Number(data.templateId) : null,
       status: "draft"
@@ -130,35 +127,26 @@ export default function Experiments() {
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="code" className="flex items-center gap-2">
-                    <Hash className="w-4 h-4 text-muted-foreground" />
-                    实验编码
-                  </Label>
-                  <Input id="code" {...form.register("code")} placeholder="留空自动生成" data-testid="input-experiment-code" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="priority" className="flex items-center gap-2">
-                    <Flag className="w-4 h-4 text-muted-foreground" />
-                    优先级
-                  </Label>
-                  <Select
-                    value={form.watch("priority")}
-                    onValueChange={(val) => form.setValue("priority", val as "P1" | "P2" | "P3")}
-                  >
-                    <SelectTrigger data-testid="select-priority">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PRIORITY_OPTS.map(opt => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          <span className={opt.color}>{opt.label}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="priority" className="flex items-center gap-2">
+                  <Flag className="w-4 h-4 text-muted-foreground" />
+                  优先级
+                </Label>
+                <Select
+                  value={form.watch("priority")}
+                  onValueChange={(val) => form.setValue("priority", val as "P1" | "P2" | "P3")}
+                >
+                  <SelectTrigger data-testid="select-priority">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRIORITY_OPTS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        <span className={opt.color}>{opt.label}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">

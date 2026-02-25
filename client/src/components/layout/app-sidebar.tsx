@@ -54,13 +54,19 @@ export function AppSidebar() {
     <Sidebar className="border-r border-sidebar-border">
       <SidebarContent>
         <SidebarGroup>
-          <div className="p-4 mb-2">
-            <h2 className="text-lg font-bold text-sidebar-primary-foreground leading-tight">
-              数据标注实验平台
-            </h2>
-            <p className="text-xs text-sidebar-foreground/60 mt-1">
-              {ROLE_LABELS[role] ?? role}
-            </p>
+          <div className="p-4 mb-2 flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" className="w-9 h-9 shrink-0">
+              <rect width="40" height="40" rx="10" fill="#2563EB"/>
+              <path d="M10 21L17 28L30 13" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <div>
+              <h2 className="text-sm font-bold text-sidebar-primary-foreground leading-tight">
+                数据标注实验平台
+              </h2>
+              <p className="text-xs text-sidebar-foreground/60 mt-0.5">
+                {ROLE_LABELS[role] ?? role}
+              </p>
+            </div>
           </div>
 
           {isAdmin && (

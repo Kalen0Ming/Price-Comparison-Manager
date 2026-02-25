@@ -202,7 +202,6 @@ export async function registerRoutes(
     try {
       const schema = z.object({
         name: z.string().min(1),
-        code: z.string().optional().nullable(),
         priority: z.enum(["P1", "P2", "P3"]).optional().default("P2"),
         description: z.string().optional().nullable(),
         deadline: z.string().optional().nullable().transform(v => v ? new Date(v) : null),
@@ -212,14 +211,14 @@ export async function registerRoutes(
         templateId: z.coerce.number().optional().nullable(),
       });
       const input = schema.parse(req.body);
-      const created = await storage.createExperiment(input as any);
-      if (!created.code) {
-        const now = new Date();
-        const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
-        const autoCode = `EXP-${ymd}-${String(created.id).padStart(4,"0")}`;
-        const updated = await storage.updateExperiment(created.id, { code: autoCode } as any);
-        return res.status(201).json(updated);
-      }
+      // Generate meaningful unique code: EXP-{YYYYMMDD}-{PRIORITY}-{6 random chars}
+      const now = new Date();
+      const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const rand = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+      const priority = input.priority ?? "P2";
+      const autoCode = `EXP-${ymd}-${priority}-${rand}`;
+      const created = await storage.createExperiment({ ...input, code: autoCode } as any);
       res.status(201).json(created);
     } catch (e) {
       console.error("Create experiment error:", e);

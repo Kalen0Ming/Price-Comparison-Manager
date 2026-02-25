@@ -12,8 +12,9 @@ import { useToast } from "@/hooks/use-toast";
 import { getCurrentUser } from "@/hooks/use-auth";
 import {
   ArrowLeft, Save, CheckCircle, Tag, ShoppingCart,
-  ArrowUpDown, Equal, ArrowUp, ArrowDown, AlertCircle, ExternalLink, X, ZoomIn,
+  ArrowUpDown, Equal, ArrowUp, ArrowDown, AlertCircle, ExternalLink, X, ZoomIn, Clock, AlertTriangle,
 } from "lucide-react";
+import { format } from "date-fns";
 import type { Task, Experiment, Annotation, AnnotationTemplate, AnnotationField, DisplayField } from "@shared/schema";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|bmp|avif)(\?.*)?$/i;
@@ -370,6 +371,59 @@ function DefaultAnnotationForm({
   );
 }
 
+function DeadlineCountdown({ deadline }: { deadline: Date }) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const diffMs = deadline.getTime() - now.getTime();
+  const isPast = diffMs <= 0;
+  const absDiff = Math.abs(diffMs);
+
+  const totalSecs = Math.floor(absDiff / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const minutes = Math.floor((totalSecs % 3600) / 60);
+  const seconds = totalSecs % 60;
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  let countdownText: string;
+  let colorCls: string;
+  let showAlert = false;
+
+  if (isPast) {
+    countdownText = `已超期 ${days > 0 ? `${days} 天 ` : ""}${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    colorCls = "text-red-700 bg-red-50 border border-red-200";
+    showAlert = true;
+  } else if (diffMs < 86400_000) {
+    countdownText = `还剩 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    colorCls = "text-red-600 font-semibold";
+    showAlert = true;
+  } else if (diffMs < 3 * 86400_000) {
+    countdownText = `还剩 ${days} 天 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    colorCls = "text-amber-600";
+  } else {
+    countdownText = `还剩 ${days} 天 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    colorCls = "text-muted-foreground";
+  }
+
+  return (
+    <div className={`flex items-center gap-2 mt-1.5 text-xs px-2 py-1 rounded w-fit ${isPast ? colorCls : ""}`}>
+      {showAlert && !isPast
+        ? <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+        : showAlert
+        ? <AlertTriangle className="w-3.5 h-3.5 text-red-700 shrink-0" />
+        : <Clock className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+      <span className="text-muted-foreground">截止时间：{format(deadline, "yyyy-MM-dd HH:mm")}</span>
+      <span className={`ml-1 ${isPast ? "" : colorCls}`}>{countdownText}</span>
+    </div>
+  );
+}
+
 export default function AnnotationWorkspace() {
   const { id } = useParams<{ id: string }>();
   const taskId = Number(id);
@@ -477,6 +531,7 @@ export default function AnnotationWorkspace() {
             {isAnnotated && <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"><CheckCircle className="w-3 h-3" /> 已完成</span>}
             {isDraft && <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"><Save className="w-3 h-3" /> 草稿</span>}
           </div>
+          {task.experiment?.deadline && <DeadlineCountdown deadline={new Date(task.experiment.deadline)} />}
           {lastSaved && <p className="text-xs text-muted-foreground mt-1">最后保存：{lastSaved.toLocaleTimeString("zh-CN")}</p>}
         </div>
         <div className="flex gap-2">
