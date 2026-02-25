@@ -145,11 +145,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = getCurrentUser();
   const style = {
     "--sidebar-width": "16rem",
-    "--sidebar-background": "hsl(222 47% 11%)",
-    "--sidebar-foreground": "hsl(210 40% 98%)",
-    "--sidebar-border": "hsl(217 33% 17%)",
-    "--sidebar-accent": "hsl(217 33% 17%)",
-    "--sidebar-accent-foreground": "hsl(210 40% 98%)",
+    "--sidebar-background": "222 47% 11%",
+    "--sidebar-foreground": "210 40% 98%",
+    "--sidebar-border": "217 33% 17%",
+    "--sidebar-accent": "217 33% 17%",
+    "--sidebar-accent-foreground": "210 40% 98%",
+    "--sidebar-primary-foreground": "0 0% 100%",
   } as React.CSSProperties;
 
   return (

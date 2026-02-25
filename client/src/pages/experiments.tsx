@@ -20,7 +20,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useExperiments, useCreateExperiment } from "@/hooks/use-experiments";
-import { Plus, Beaker, Calendar, Settings2, LayoutTemplate, Flag } from "lucide-react";
+import { Plus, Beaker, Calendar, Settings2, LayoutTemplate, Flag, Hash } from "lucide-react";
 import type { AnnotationTemplate } from "@shared/schema";
 
 const PRIORITY_OPTS = [

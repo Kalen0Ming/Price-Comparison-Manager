@@ -60,10 +60,10 @@ export function AppSidebar() {
               <path d="M10 21L17 28L30 13" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
             <div>
-              <h2 className="text-sm font-bold text-sidebar-primary-foreground leading-tight">
+              <h2 className="text-sm font-bold leading-tight text-sidebar-foreground">
                 数据标注实验平台
               </h2>
-              <p className="text-xs text-sidebar-foreground/60 mt-0.5">
+              <p className="text-xs mt-0.5 text-sidebar-foreground/60">
                 {ROLE_LABELS[role] ?? role}
               </p>
             </div>
