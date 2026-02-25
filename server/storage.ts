@@ -49,6 +49,8 @@ export interface IStorage {
   assignTasksToUser(taskIds: number[], userId: number): Promise<number>;
   assignTasksRandom(experimentId: number, userIds: number[], count?: number): Promise<Record<number, number>>;
   adjudicateTask(taskId: number, finalResult: Record<string, unknown>): Promise<Task>;
+  getMyExperiments(userId: number): Promise<{ experiment: Experiment; totalTasks: number; annotatedTasks: number }[]>;
+  getExperimentTasksForUser(experimentId: number, userId: number | null): Promise<(Task & { annotation: Annotation | null })[]>;
 
   // Annotations
   getAnnotations(): Promise<Annotation[]>;
@@ -245,6 +247,34 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tasks.id, taskId))
       .returning();
     return updated;
+  }
+
+  async getMyExperiments(userId: number): Promise<{ experiment: Experiment; totalTasks: number; annotatedTasks: number }[]> {
+    const myTasks = await db.select().from(tasks).where(eq(tasks.assignedTo, userId));
+    const expIdSet = new Set(myTasks.map(t => t.experimentId));
+    const result = [];
+    for (const eid of expIdSet) {
+      const exp = await this.getExperiment(eid);
+      if (!exp) continue;
+      const expTasks = myTasks.filter(t => t.experimentId === eid);
+      const annotated = expTasks.filter(t => t.status === "annotated" || t.status === "needs_review" || t.status === "completed").length;
+      result.push({ experiment: exp, totalTasks: expTasks.length, annotatedTasks: annotated });
+    }
+    return result;
+  }
+
+  async getExperimentTasksForUser(experimentId: number, userId: number | null): Promise<(Task & { annotation: Annotation | null })[]> {
+    const expTasks = userId
+      ? await db.select().from(tasks).where(and(eq(tasks.experimentId, experimentId), eq(tasks.assignedTo, userId)))
+      : await db.select().from(tasks).where(eq(tasks.experimentId, experimentId));
+    const result: (Task & { annotation: Annotation | null })[] = [];
+    for (const task of expTasks) {
+      const [ann] = await db.select().from(annotations).where(
+        and(eq(annotations.taskId, task.id), ...(userId ? [eq(annotations.userId, userId)] : []))
+      );
+      result.push({ ...task, annotation: ann || null });
+    }
+    return result;
   }
 
   async getAnnotations(): Promise<Annotation[]> {

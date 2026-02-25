@@ -22,6 +22,8 @@ export const annotationTemplates = pgTable("annotation_templates", {
 
 export const experiments = pgTable("experiments", {
   id: serial("id").primaryKey(),
+  code: text("code"),
+  priority: text("priority").default("P2"),
   name: text("name").notNull(),
   description: text("description"),
   createdAt: timestamp("created_at").defaultNow(),

@@ -20,11 +20,19 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useExperiments, useCreateExperiment } from "@/hooks/use-experiments";
-import { Plus, Beaker, Calendar, Settings2, LayoutTemplate } from "lucide-react";
+import { Plus, Beaker, Calendar, Settings2, LayoutTemplate, Hash, Flag } from "lucide-react";
 import type { AnnotationTemplate } from "@shared/schema";
+
+const PRIORITY_OPTS = [
+  { value: "P1", label: "P1 — 紧急", color: "text-red-600" },
+  { value: "P2", label: "P2 — 普通", color: "text-amber-600" },
+  { value: "P3", label: "P3 — 低", color: "text-slate-500" },
+];
 
 const formSchema = z.object({
   name: z.string().min(1, "实验名称不能为空"),
+  code: z.string().optional(),
+  priority: z.enum(["P1", "P2", "P3"]).default("P2"),
   description: z.string().optional(),
   deadline: z.string().optional(),
   enableReview: z.boolean().default(false),
@@ -62,6 +70,8 @@ export default function Experiments() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
+      code: "",
+      priority: "P2",
       description: "",
       deadline: "",
       enableReview: false,
@@ -73,6 +83,7 @@ export default function Experiments() {
   const onSubmit = (data: FormValues) => {
     createExperiment.mutate({
       ...data,
+      code: data.code || undefined,
       deadline: data.deadline ? new Date(data.deadline).toISOString() : null,
       templateId: data.templateId ? Number(data.templateId) : null,
       status: "draft"
@@ -117,6 +128,37 @@ export default function Experiments() {
                 {form.formState.errors.name && (
                   <p className="text-sm text-destructive">{form.formState.errors.name.message}</p>
                 )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="code" className="flex items-center gap-2">
+                    <Hash className="w-4 h-4 text-muted-foreground" />
+                    实验编码
+                  </Label>
+                  <Input id="code" {...form.register("code")} placeholder="留空自动生成" data-testid="input-experiment-code" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="priority" className="flex items-center gap-2">
+                    <Flag className="w-4 h-4 text-muted-foreground" />
+                    优先级
+                  </Label>
+                  <Select
+                    value={form.watch("priority")}
+                    onValueChange={(val) => form.setValue("priority", val as "P1" | "P2" | "P3")}
+                  >
+                    <SelectTrigger data-testid="select-priority">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRIORITY_OPTS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          <span className={opt.color}>{opt.label}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -196,10 +238,10 @@ export default function Experiments() {
           <Table>
             <TableHeader className="bg-slate-50/80">
               <TableRow>
-                <TableHead className="font-semibold text-slate-600">实验名称</TableHead>
+                <TableHead className="font-semibold text-slate-600">优先级</TableHead>
+                <TableHead className="font-semibold text-slate-600">实验名称 / 编码</TableHead>
                 <TableHead className="font-semibold text-slate-600">状态</TableHead>
                 <TableHead className="font-semibold text-slate-600">复核配置</TableHead>
-                <TableHead className="font-semibold text-slate-600">创建时间</TableHead>
                 <TableHead className="font-semibold text-slate-600">截止时间</TableHead>
                 <TableHead className="text-right font-semibold text-slate-600">操作</TableHead>
               </TableRow>
@@ -214,9 +256,27 @@ export default function Experiments() {
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">暂无实验，点击"新建实验"开始。</TableCell>
                 </TableRow>
               ) : (
-                experiments.map((exp) => (
+                experiments.map((exp) => {
+                  const pCfg = exp.priority === "P1"
+                    ? { bg: "bg-red-100", text: "text-red-700", label: "P1" }
+                    : exp.priority === "P3"
+                    ? { bg: "bg-slate-100", text: "text-slate-600", label: "P3" }
+                    : { bg: "bg-amber-100", text: "text-amber-700", label: "P2" };
+                  return (
                   <TableRow key={exp.id} className="hover:bg-slate-50/50 transition-colors" data-testid={`row-experiment-${exp.id}`}>
-                    <TableCell className="font-medium">{exp.name}</TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${pCfg.bg} ${pCfg.text}`}>
+                        {pCfg.label}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <p className="font-medium text-foreground">{exp.name}</p>
+                      {(exp as any).code && (
+                        <p className="text-xs font-mono text-muted-foreground flex items-center gap-1 mt-0.5">
+                          <Hash className="w-3 h-3" />{(exp as any).code}
+                        </p>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[exp.status] ?? 'bg-slate-100 text-slate-800'}`}>
                         {STATUS_LABELS[exp.status] ?? exp.status}
@@ -228,9 +288,6 @@ export default function Experiments() {
                       ) : (
                         <span className="text-sm text-slate-400">未启用</span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-sm text-slate-600">
-                      {exp.createdAt ? format(new Date(exp.createdAt), 'yyyy-MM-dd') : '-'}
                     </TableCell>
                     <TableCell className="text-sm text-slate-600">
                       {exp.deadline ? format(new Date(exp.deadline), 'yyyy-MM-dd HH:mm') : '-'}
@@ -247,7 +304,8 @@ export default function Experiments() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>

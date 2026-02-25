@@ -202,6 +202,8 @@ export async function registerRoutes(
     try {
       const schema = z.object({
         name: z.string().min(1),
+        code: z.string().optional().nullable(),
+        priority: z.enum(["P1", "P2", "P3"]).optional().default("P2"),
         description: z.string().optional().nullable(),
         deadline: z.string().optional().nullable().transform(v => v ? new Date(v) : null),
         enableReview: z.boolean().optional().default(false),
@@ -210,7 +212,15 @@ export async function registerRoutes(
         templateId: z.coerce.number().optional().nullable(),
       });
       const input = schema.parse(req.body);
-      res.status(201).json(await storage.createExperiment(input as any));
+      const created = await storage.createExperiment(input as any);
+      if (!created.code) {
+        const now = new Date();
+        const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
+        const autoCode = `EXP-${ymd}-${String(created.id).padStart(4,"0")}`;
+        const updated = await storage.updateExperiment(created.id, { code: autoCode } as any);
+        return res.status(201).json(updated);
+      }
+      res.status(201).json(created);
     } catch (e) {
       console.error("Create experiment error:", e);
       res.status(400).json({ message: "Invalid input" });
@@ -221,6 +231,8 @@ export async function registerRoutes(
     try {
       const schema = z.object({
         name: z.string().min(1).optional(),
+        code: z.string().optional().nullable(),
+        priority: z.enum(["P1", "P2", "P3"]).optional(),
         description: z.string().optional().nullable(),
         deadline: z.string().optional().nullable().transform(v => v ? new Date(v) : null),
         enableReview: z.boolean().optional(),
@@ -420,6 +432,64 @@ export async function registerRoutes(
         return { ...t, experiment: exp, template };
       });
       res.json(enriched);
+    } catch {
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  // My experiments (experiment-level view for annotators/admin)
+  app.get("/api/my-experiments", async (req, res) => {
+    try {
+      if (req.query.all === "true") {
+        const exps = await storage.getExperiments();
+        const result = await Promise.all(exps.map(async (exp) => {
+          const expTasks = await storage.getTasks(exp.id);
+          const annotated = expTasks.filter(t => ["annotated","needs_review","completed"].includes(t.status)).length;
+          const template = exp.templateId ? await storage.getTemplate(exp.templateId) : null;
+          return { experiment: exp, template, totalTasks: expTasks.length, annotatedTasks: annotated };
+        }));
+        return res.json(result.filter(r => r.totalTasks > 0));
+      }
+      const userId = z.coerce.number().parse(req.query.userId);
+      const items = await storage.getMyExperiments(userId);
+      const result = await Promise.all(items.map(async (item) => {
+        const template = item.experiment.templateId ? await storage.getTemplate(item.experiment.templateId) : null;
+        return { ...item, template };
+      }));
+      const PRIORITY_ORDER: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
+      result.sort((a, b) => (PRIORITY_ORDER[a.experiment.priority ?? "P2"] ?? 1) - (PRIORITY_ORDER[b.experiment.priority ?? "P2"] ?? 1));
+      res.json(result);
+    } catch {
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  // Tasks for a specific experiment (table view for annotator)
+  app.get("/api/experiments/:id/tasks-for-user", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const userId = req.query.all === "true" ? null : z.coerce.number().parse(req.query.userId);
+      const expTasks = await storage.getExperimentTasksForUser(expId, userId);
+      const exp = await storage.getExperiment(expId);
+      const template = exp?.templateId ? await storage.getTemplate(exp.templateId) : null;
+      res.json({ tasks: expTasks, experiment: exp, template });
+    } catch {
+      res.status(400).json({ message: "Invalid request" });
+    }
+  });
+
+  // Inline annotation (for table view)
+  app.post("/api/tasks/:id/annotate-inline", async (req, res) => {
+    try {
+      const taskId = Number(req.params.id);
+      const { userId, result } = z.object({
+        userId: z.number(),
+        result: z.record(z.any()),
+      }).parse(req.body);
+      const annotation = await storage.upsertAnnotation({ taskId, userId, result, type: "initial" });
+      await storage.updateTask(taskId, { status: "annotated" });
+      await triggerReviewCheck(taskId, (await storage.getTask(taskId))?.experimentId ?? 0);
+      res.json({ annotation });
     } catch {
       res.status(400).json({ message: "Invalid request" });
     }

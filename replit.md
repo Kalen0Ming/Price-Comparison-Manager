@@ -13,7 +13,7 @@
 |------|------|
 | users | 用户（admin/annotator 角色） |
 | annotation_templates | 标注模板（展示字段+标注字段+判断字段） |
-| experiments | 实验（含截止时间、复核设置、templateId FK） |
+| experiments | 实验（含 code 唯一编码、priority 优先级 P1/P2/P3、截止时间、复核设置、templateId FK） |
 | tasks | 标注任务（含 assignedTo、assignedAt） |
 | annotations | 标注结果（支持 draft/initial/review 类型） |
 | notifications | 系统通知（info/warning/urgent） |
@@ -39,8 +39,9 @@
 6. **用户管理、标注结果、系统日志**
 
 ### 标注员
-1. **我的任务**: 显示分配给自己的待完成任务列表（含实验信息、截止时间）
-2. **标注工作台**: 双栏商品信息展示，标注选项：
+1. **我的任务** (`/my-tasks`): 以实验为单位展示，每个实验卡片含优先级 badge（P1红/P2黄/P3灰）、实验编码、名称、截止时间、任务进度条。按优先级排序（P1优先）。管理员可查看所有实验。
+2. **实验内联标注** (`/my-tasks/:experimentId`): Excel 式表格，每行显示原始数据字段（来自模板 displayFields）和内联标注选项（来自模板 annotationFields）。点击选项即时保存，无需跳转。支持搜索和分页（50条/页）。
+3. **标注工作台**: 双栏商品信息展示，标注选项：
    - 是否同款（是/否/不确定）
    - 价格对比（A更贵/A更便宜/相同/无法判断）
    - 质量对比（可选）
@@ -97,8 +98,9 @@
 - `server/storage.ts` - DatabaseStorage 接口实现
 - `server/routes.ts` - API 路由 + 定时任务
 - `client/src/hooks/use-auth.ts` - 认证（localStorage current_user）
-- `client/src/pages/my-tasks.tsx` - 标注员任务列表
-- `client/src/pages/annotation-workspace.tsx` - 标注工作台
+- `client/src/pages/my-tasks.tsx` - 标注员实验级任务列表（优先级卡片视图）
+- `client/src/pages/experiment-task-list.tsx` - 实验内联标注表格（Excel 式，`/my-tasks/:id`）
+- `client/src/pages/annotation-workspace.tsx` - 标注工作台（单任务详情模式）
 - `client/src/pages/experiment-detail.tsx` - 实验详情+任务分配
 - `client/src/components/layout/dashboard-layout.tsx` - 通知铃铛
 - `client/src/components/layout/app-sidebar.tsx` - 角色化导航侧边栏
