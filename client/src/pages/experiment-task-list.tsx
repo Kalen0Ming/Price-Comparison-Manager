@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, useLocation } from "wouter";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -11,9 +11,9 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChevronLeft, CheckCircle, Circle, Hash, Clock, AlertTriangle,
-  Search, ChevronLeft as PrevIcon, ChevronRight as NextIcon,
+  Search, ChevronLeft as PrevIcon, ChevronRight as NextIcon, SendHorizonal,
 } from "lucide-react";
-import { format, differenceInDays } from "date-fns";
+import { format } from "date-fns";
 import type { Task, AnnotationTemplate } from "@shared/schema";
 
 type TaskWithAnnotation = Task & {
@@ -68,6 +68,60 @@ function CellValue({ value }: { value: unknown }) {
   return <span className="text-xs text-foreground" title={str}>{truncate(str, 40)}</span>;
 }
 
+function LiveCountdown({ deadline }: { deadline: string }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const d = new Date(deadline);
+  const diffMs = d.getTime() - now.getTime();
+  const isPast = diffMs <= 0;
+  const abs = Math.abs(diffMs);
+  const totalSecs = Math.floor(abs / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  const timeStr = days > 0
+    ? `${days}天 ${pad(hours)}:${pad(mins)}:${pad(secs)}`
+    : `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+
+  if (isPast) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-0.5 font-semibold">
+        <AlertTriangle className="w-3 h-3" />
+        已超期 {timeStr}
+      </span>
+    );
+  }
+  if (diffMs < 86400_000) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-red-600 font-semibold tabular-nums">
+        <AlertTriangle className="w-3 h-3" />
+        截止 {format(d, "MM-dd HH:mm")} · 还剩 {timeStr}
+      </span>
+    );
+  }
+  if (diffMs < 3 * 86400_000) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-amber-600 tabular-nums">
+        <Clock className="w-3 h-3" />
+        截止 {format(d, "MM-dd HH:mm")} · 还剩 {timeStr}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums">
+      <Clock className="w-3 h-3" />
+      截止 {format(d, "MM-dd HH:mm")} · 还剩 {timeStr}
+    </span>
+  );
+}
+
 export default function ExperimentTaskList() {
   const { id: experimentId } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
@@ -78,6 +132,7 @@ export default function ExperimentTaskList() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [optimisticAnnotations, setOptimisticAnnotations] = useState<Record<number, Record<string, string>>>({});
+  const [confirmed, setConfirmed] = useState(false);
 
   const queryKey = ["/api/experiments", experimentId, "tasks-for-user", user?.id];
   const { data, isLoading } = useQuery<PageData>({
@@ -100,6 +155,25 @@ export default function ExperimentTaskList() {
       queryClient.invalidateQueries({ queryKey });
     },
     onError: () => toast({ title: "保存失败", variant: "destructive" }),
+  });
+
+  const confirmSubmitMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/experiments/${experimentId}/confirm-submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user?.id }),
+      });
+      if (!res.ok) throw new Error("提交失败");
+      return res.json();
+    },
+    onSuccess: (data: { confirmed: number }) => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-experiments"] });
+      toast({ title: "已确认提交", description: `${data.confirmed} 条标注结果已成功提交，任务已标记为完成。` });
+      setConfirmed(true);
+    },
+    onError: () => toast({ variant: "destructive", title: "提交失败，请重试" }),
   });
 
   const { experiment: exp, template, tasks: allTasks = [] } = data ?? {};
@@ -151,6 +225,8 @@ export default function ExperimentTaskList() {
   }).length;
 
   const pct = allTasks.length > 0 ? Math.round((annotatedCount / allTasks.length) * 100) : 0;
+  const allAnnotated = allTasks.length > 0 && annotatedCount >= allTasks.length;
+  const alreadyAllCompleted = allTasks.length > 0 && allTasks.every(t => t.status === "completed" || t.status === "needs_review");
 
   const priority = exp?.priority ?? "P2";
   const pCfg = PRIORITY_CONFIG[priority] ?? PRIORITY_CONFIG.P2;
@@ -174,14 +250,14 @@ export default function ExperimentTaskList() {
                     <Hash className="w-3.5 h-3.5" />{exp.code}
                   </span>
                 )}
-                {exp.deadline && (
-                  <span className={`text-xs flex items-center gap-1 ${differenceInDays(new Date(exp.deadline), new Date()) < 2 ? "text-red-500 font-semibold" : "text-muted-foreground"}`}>
-                    <Clock className="w-3.5 h-3.5" />截止 {format(new Date(exp.deadline), "yyyy-MM-dd")}
-                  </span>
-                )}
               </div>
               <h1 className="text-2xl font-bold text-foreground" data-testid="text-experiment-name">{exp.name}</h1>
               {exp.description && <p className="text-sm text-muted-foreground mt-0.5">{exp.description}</p>}
+              {exp.deadline && (
+                <div className="mt-2">
+                  <LiveCountdown deadline={exp.deadline} />
+                </div>
+              )}
             </div>
 
             <div className="text-right min-w-[160px]">
@@ -195,6 +271,48 @@ export default function ExperimentTaskList() {
           </div>
         )}
       </div>
+
+      {/* Confirm Submit Banner */}
+      {!isAdmin && !isLoading && exp && (
+        <>
+          {(confirmed || alreadyAllCompleted) ? (
+            <div className="mb-4 flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-200 text-green-700">
+              <CheckCircle className="w-5 h-5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">标注结果已提交完成</p>
+                <p className="text-xs mt-0.5 text-green-600">你的所有标注结果已成功提交，此实验任务已结束。</p>
+              </div>
+            </div>
+          ) : allAnnotated ? (
+            <div className="mb-4 flex items-center justify-between gap-4 p-4 rounded-xl bg-amber-50 border border-amber-200">
+              <div>
+                <p className="font-semibold text-sm text-amber-800">全部标注已完成，请确认提交</p>
+                <p className="text-xs mt-0.5 text-amber-600">
+                  你已完成全部 {allTasks.length} 条数据的标注。点击「确认提交」后，你的标注结果将正式计入实验，任务将标记为完成。
+                </p>
+              </div>
+              <Button
+                className="gap-2 shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => {
+                  if (confirm(`确认提交全部 ${allTasks.length} 条标注结果？提交后不可撤销。`)) {
+                    confirmSubmitMutation.mutate();
+                  }
+                }}
+                disabled={confirmSubmitMutation.isPending}
+                data-testid="button-confirm-submit"
+              >
+                <SendHorizonal className="w-4 h-4" />
+                {confirmSubmitMutation.isPending ? "提交中..." : "确认提交"}
+              </Button>
+            </div>
+          ) : allTasks.length > 0 ? (
+            <div className="mb-4 flex items-center gap-3 p-3 rounded-xl bg-muted/50 border border-border/50 text-muted-foreground text-xs">
+              <Circle className="w-4 h-4 shrink-0" />
+              还有 <span className="font-semibold text-foreground">{allTasks.length - annotatedCount}</span> 条数据待标注，完成全部后可提交。
+            </div>
+          ) : null}
+        </>
+      )}
 
       <div className="flex items-center justify-between mb-4 gap-3">
         <div className="relative flex-1 max-w-xs">
@@ -351,6 +469,25 @@ export default function ExperimentTaskList() {
           <span className="text-sm text-muted-foreground">第 {page} 页，共 {totalPages} 页</span>
           <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
             下一页
+          </Button>
+        </div>
+      )}
+
+      {/* Bottom confirm submit for long lists */}
+      {!isAdmin && !isLoading && allAnnotated && !confirmed && !alreadyAllCompleted && totalPages > 1 && (
+        <div className="mt-6 flex justify-end">
+          <Button
+            className="gap-2 bg-amber-600 hover:bg-amber-700 text-white"
+            onClick={() => {
+              if (confirm(`确认提交全部 ${allTasks.length} 条标注结果？提交后不可撤销。`)) {
+                confirmSubmitMutation.mutate();
+              }
+            }}
+            disabled={confirmSubmitMutation.isPending}
+            data-testid="button-confirm-submit-bottom"
+          >
+            <SendHorizonal className="w-4 h-4" />
+            {confirmSubmitMutation.isPending ? "提交中..." : "确认提交全部标注"}
           </Button>
         </div>
       )}

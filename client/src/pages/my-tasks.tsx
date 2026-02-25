@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -11,7 +11,7 @@ import {
   ClipboardList, ChevronRight, Clock, CheckCircle, AlertCircle,
   AlertTriangle, Eye, Hash, ShieldCheck,
 } from "lucide-react";
-import { format, differenceInHours, differenceInDays } from "date-fns";
+import { format } from "date-fns";
 import type { Task, Experiment, Annotation, AnnotationTemplate } from "@shared/schema";
 
 type ExperimentItem = {
@@ -48,28 +48,46 @@ function PriorityBadge({ priority }: { priority: string | null | undefined }) {
 }
 
 function DeadlineBadge({ deadline }: { deadline: string | Date | null | undefined }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   if (!deadline) return null;
   const d = new Date(deadline);
-  const hoursLeft = differenceInHours(d, new Date());
-  const daysLeft = differenceInDays(d, new Date());
-  if (hoursLeft < 0) return (
-    <span className="text-xs text-red-600 font-semibold flex items-center gap-1">
-      <AlertTriangle className="w-3 h-3" />已逾期 {format(d, "MM-dd")}
+  const diffMs = d.getTime() - now.getTime();
+  const isPast = diffMs <= 0;
+  const abs = Math.abs(diffMs);
+  const totalSecs = Math.floor(abs / 1000);
+  const days = Math.floor(totalSecs / 86400);
+  const hours = Math.floor((totalSecs % 86400) / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const secs = totalSecs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  const timeStr = days > 0
+    ? `${days}天 ${pad(hours)}:${pad(mins)}:${pad(secs)}`
+    : `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+
+  if (isPast) return (
+    <span className="text-xs text-red-600 font-semibold flex items-center gap-1 tabular-nums">
+      <AlertTriangle className="w-3 h-3" />已超期 {timeStr}
     </span>
   );
-  if (hoursLeft < 24) return (
-    <span className="text-xs text-red-500 font-medium flex items-center gap-1">
-      <AlertCircle className="w-3 h-3" />紧急·剩 {hoursLeft} 小时
+  if (diffMs < 86400_000) return (
+    <span className="text-xs text-red-500 font-semibold flex items-center gap-1 tabular-nums">
+      <AlertCircle className="w-3 h-3" />紧急·还剩 {timeStr}
     </span>
   );
-  if (daysLeft < 3) return (
-    <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
-      <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}（剩 {daysLeft} 天）
+  if (diffMs < 3 * 86400_000) return (
+    <span className="text-xs text-amber-600 flex items-center gap-1 tabular-nums">
+      <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}·还剩 {timeStr}
     </span>
   );
   return (
-    <span className="text-xs text-muted-foreground flex items-center gap-1">
-      <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}
+    <span className="text-xs text-muted-foreground flex items-center gap-1 tabular-nums">
+      <Clock className="w-3 h-3" />截止 {format(d, "MM-dd HH:mm")}·还剩 {timeStr}
     </span>
   );
 }

@@ -50,16 +50,6 @@ async function triggerReviewCheck(taskId: number, experimentId: number) {
       status: "needs_review",
       reviewedBy: selectedReviewer.id,
     } as any);
-
-    // Notify reviewer
-    await storage.createNotification({
-      userId: selectedReviewer.id,
-      title: "新复核任务待处理",
-      message: `实验「${exp.name}」中有一条标注结果（任务 #${taskId}）已被抽选为复核，请前往复核任务列表处理。`,
-      type: "info",
-      isRead: false,
-      experimentId: exp.id,
-    });
   } catch (e) {
     console.error("Review trigger error:", e);
   }
@@ -367,6 +357,16 @@ export async function registerRoutes(
       for (const tid of taskIds) {
         await storage.updateTask(tid, { batchId: batch.id } as any);
       }
+      // Notify annotator
+      const deadlineStr = exp?.deadline ? `截止时间：${new Date(exp.deadline).toLocaleString("zh-CN")}` : "（无截止时间）";
+      await storage.createNotification({
+        userId,
+        title: "你有新的标注任务",
+        message: `实验「${exp?.name ?? expId}」已为你分配了 ${count} 条标注数据，${deadlineStr}，请前往【我的任务】开始标注。`,
+        type: "info",
+        isRead: false,
+        experimentId: expId,
+      });
       res.json({ assigned: count, batch });
     } catch {
       res.status(400).json({ message: "Invalid input" });
@@ -408,7 +408,38 @@ export async function registerRoutes(
       for (const tid of recentBatchIds) {
         await storage.updateTask(tid, { batchId: batch.id } as any);
       }
+      // Notify each annotator
+      const deadlineStr2 = exp?.deadline ? `截止时间：${new Date(exp.deadline).toLocaleString("zh-CN")}` : "（无截止时间）";
+      for (const uid of userIds) {
+        const userCount = result[uid] ?? 0;
+        if (userCount > 0) {
+          await storage.createNotification({
+            userId: uid,
+            title: "你有新的标注任务",
+            message: `实验「${exp?.name ?? expId}」已为你分配了 ${userCount} 条标注数据，${deadlineStr2}，请前往【我的任务】开始标注。`,
+            type: "info",
+            isRead: false,
+            experimentId: expId,
+          });
+        }
+      }
       res.json({ assigned: total, distribution: result, batch });
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // Confirm-submit: annotator confirms all their annotated tasks in an experiment
+  app.post("/api/experiments/:id/confirm-submit", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const { userId } = z.object({ userId: z.number() }).parse(req.body);
+      const tasks = await storage.getTasks(expId);
+      const toComplete = tasks.filter(t => t.assignedTo === userId && t.status === "annotated");
+      for (const t of toComplete) {
+        await storage.updateTask(t.id, { status: "completed" } as any);
+      }
+      res.json({ confirmed: toComplete.length });
     } catch {
       res.status(400).json({ message: "Invalid input" });
     }
