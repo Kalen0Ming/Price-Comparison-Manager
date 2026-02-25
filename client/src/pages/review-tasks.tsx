@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCurrentUser } from "@/hooks/use-auth";
-import { ShieldCheck, ChevronRight, AlertTriangle, CheckCircle, Clock, Eye } from "lucide-react";
+import { ShieldCheck, ChevronRight, AlertTriangle, CheckCircle, Clock, Eye, ArrowLeft } from "lucide-react";
 import { format } from "date-fns";
 import type { Task, Experiment, Annotation } from "@shared/schema";
 
@@ -32,7 +32,13 @@ function ResultChip({ field, value }: { field: string; value: unknown }) {
 
 export default function ReviewTasks() {
   const user = getCurrentUser();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+
+  const searchParams = new URLSearchParams(
+    typeof window !== "undefined" ? window.location.search : ""
+  );
+  const expIdParam = searchParams.get("exp");
+  const expId = expIdParam ? parseInt(expIdParam) : null;
 
   const { data: tasks = [], isLoading } = useQuery<ReviewTask[]>({
     queryKey: ["/api/review-tasks", user?.id],
@@ -44,26 +50,51 @@ export default function ReviewTasks() {
     enabled: !!user,
   });
 
+  const filteredTasks = expId ? tasks.filter(t => t.experiment?.id === expId) : tasks;
+  const experimentName = expId
+    ? (filteredTasks[0]?.experiment?.name ?? `实验 #${expId}`)
+    : null;
+
+  const pendingCount = filteredTasks.filter(t => t.status !== "completed" && t.status !== "annotated").length;
+  const doneCount = filteredTasks.filter(t => t.status === "completed" || t.status === "annotated").length;
+
   return (
     <DashboardLayout>
       <div className="mb-8">
+        {expId && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mb-4 gap-2 -ml-2 text-muted-foreground hover:text-foreground"
+            onClick={() => setLocation("/my-tasks")}
+            data-testid="button-back-my-tasks"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            返回我的任务
+          </Button>
+        )}
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
             <ShieldCheck className="w-5 h-5 text-amber-600" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">复核任务</h1>
-            <p className="text-muted-foreground text-sm">以下任务已完成初标，需要你进行复核标注</p>
+            <h1 className="text-3xl font-bold text-foreground">
+              复核任务{experimentName ? `：${experimentName}` : ""}
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              {expId
+                ? "以下是该实验中需要你进行复核标注的任务列表"
+                : "以下任务已完成初标，需要你进行复核标注"}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Summary */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         {[
-          { label: "待复核", value: tasks.length, icon: AlertTriangle, color: "text-amber-500" },
-          { label: "今日完成", value: 0, icon: CheckCircle, color: "text-green-500" },
-          { label: "总计", value: tasks.length, icon: Eye, color: "text-primary" },
+          { label: "待复核", value: pendingCount, icon: AlertTriangle, color: "text-amber-500" },
+          { label: "已完成", value: doneCount, icon: CheckCircle, color: "text-green-500" },
+          { label: "总计", value: filteredTasks.length, icon: Eye, color: "text-primary" },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="p-5 flex items-center justify-between">
@@ -77,11 +108,10 @@ export default function ReviewTasks() {
         ))}
       </div>
 
-      {/* Task List */}
       <div className="space-y-3">
         {isLoading ? (
           [...Array(3)].map((_, i) => <Skeleton key={i} className="h-28 w-full" />)
-        ) : tasks.length === 0 ? (
+        ) : filteredTasks.length === 0 ? (
           <Card>
             <CardContent className="py-16 text-center">
               <ShieldCheck className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-60" />
@@ -90,17 +120,18 @@ export default function ReviewTasks() {
             </CardContent>
           </Card>
         ) : (
-          tasks.map((task) => {
+          filteredTasks.map((task) => {
             const data = task.originalData as Record<string, unknown>;
             const productA = String(data.productA_name || data.product_a_name || Object.values(data)[0] || "—");
             const productB = String(data.productB_name || data.product_b_name || Object.values(data)[1] || "—");
             const deadline = task.experiment?.deadline;
             const initResult = task.initialAnnotation?.result as Record<string, unknown> | null;
+            const isDone = task.status === "completed" || task.status === "annotated";
 
             return (
               <Card
                 key={task.id}
-                className="cursor-pointer hover-elevate transition-shadow border-l-4 border-l-amber-400"
+                className={`cursor-pointer hover-elevate transition-shadow border-l-4 ${isDone ? "border-l-green-400 opacity-75" : "border-l-amber-400"}`}
                 onClick={() => setLocation(`/review/${task.id}`)}
                 data-testid={`card-review-task-${task.id}`}
               >
@@ -108,11 +139,16 @@ export default function ReviewTasks() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                          <ShieldCheck className="w-3 h-3" />
-                          待复核
-                        </span>
-                        {task.experiment && (
+                        {isDone ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            <CheckCircle className="w-3 h-3" />已完成
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                            <ShieldCheck className="w-3 h-3" />待复核
+                          </span>
+                        )}
+                        {!expId && task.experiment && (
                           <Badge variant="outline" className="text-xs">{task.experiment.name}</Badge>
                         )}
                         {deadline && (
@@ -124,7 +160,6 @@ export default function ReviewTasks() {
                         <span className="text-xs text-muted-foreground">任务 #{task.id}</span>
                       </div>
 
-                      {/* Product Preview */}
                       <div className="grid grid-cols-2 gap-4 mb-3">
                         <div className="bg-blue-50 rounded-lg p-3 min-w-0">
                           <p className="text-xs text-blue-600 font-medium mb-1">商品 A</p>
@@ -136,7 +171,6 @@ export default function ReviewTasks() {
                         </div>
                       </div>
 
-                      {/* Initial Annotation Preview */}
                       {initResult && (
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-muted-foreground">初标结果：</span>
@@ -150,8 +184,13 @@ export default function ReviewTasks() {
                       )}
                     </div>
 
-                    <Button size="sm" className="gap-1.5 flex-shrink-0 bg-amber-500 hover:bg-amber-600" data-testid={`button-review-${task.id}`}>
-                      开始复核
+                    <Button
+                      size="sm"
+                      className={`gap-1.5 flex-shrink-0 ${isDone ? "" : "bg-amber-500 hover:bg-amber-600"}`}
+                      variant={isDone ? "outline" : "default"}
+                      data-testid={`button-review-${task.id}`}
+                    >
+                      {isDone ? "查看详情" : "开始复核"}
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>

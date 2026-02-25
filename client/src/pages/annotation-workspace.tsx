@@ -395,19 +395,26 @@ function DeadlineCountdown({ deadline }: { deadline: Date }) {
   let colorCls: string;
   let showAlert = false;
 
+  const timeStr = days > 0
+    ? `${days}天 ${pad(hours)}小时 ${pad(minutes)}分 ${pad(seconds)}秒`
+    : `${pad(hours)}小时 ${pad(minutes)}分 ${pad(seconds)}秒`;
+
   if (isPast) {
-    countdownText = `已超期 ${days > 0 ? `${days} 天 ` : ""}${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    const overdueStr = days > 0
+      ? `${days}天 ${pad(hours)}小时 ${pad(minutes)}分 ${pad(seconds)}秒`
+      : `${pad(hours)}小时 ${pad(minutes)}分 ${pad(seconds)}秒`;
+    countdownText = `已超期 ${overdueStr}`;
     colorCls = "text-red-700 bg-red-50 border border-red-200";
     showAlert = true;
   } else if (diffMs < 86400_000) {
-    countdownText = `还剩 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    countdownText = `还剩 ${timeStr}`;
     colorCls = "text-red-600 font-semibold";
     showAlert = true;
   } else if (diffMs < 3 * 86400_000) {
-    countdownText = `还剩 ${days} 天 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    countdownText = `还剩 ${timeStr}`;
     colorCls = "text-amber-600";
   } else {
-    countdownText = `还剩 ${days} 天 ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    countdownText = `还剩 ${timeStr}`;
     colorCls = "text-muted-foreground";
   }
 

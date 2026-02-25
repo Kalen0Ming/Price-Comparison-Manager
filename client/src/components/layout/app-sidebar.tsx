@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import {
   Users, FlaskConical, CheckSquare, LayoutDashboard,
-  LogOut, Upload, Link2, ClipboardList, ShieldCheck, LayoutTemplate,
+  LogOut, Upload, Link2, ClipboardList, LayoutTemplate,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
@@ -16,12 +16,7 @@ const adminOnlyItems = [
 
 const managerItems = [
   { title: "实验管理", url: "/experiments", icon: FlaskConical },
-  { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
   { title: "分配批次管理", url: "/tasks", icon: CheckSquare },
-];
-
-const annotatorExtraItems = [
-  { title: "复核任务", url: "/review-tasks", icon: ShieldCheck },
 ];
 
 const dataItems = [
@@ -47,7 +42,7 @@ export function AppSidebar() {
 
   const isActive = (url: string) =>
     location === url ||
-    (url === "/review-tasks" && location.startsWith("/review/")) ||
+    (url === "/my-tasks" && (location.startsWith("/review") || location.startsWith("/my-tasks"))) ||
     (url === "/experiments" && location.startsWith("/experiments/"));
 
   return (
@@ -148,23 +143,6 @@ export function AppSidebar() {
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                {!isManager && annotatorExtraItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive(item.url)}
-                      tooltip={item.title}
-                      className={isActive(item.url)
-                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                        : "text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"}
-                    >
-                      <Link href={item.url} className="flex items-center gap-3">
-                        <item.icon className="w-5 h-5" />
-                        <span className="font-medium">{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </>

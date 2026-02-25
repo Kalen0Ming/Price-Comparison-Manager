@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Sheet, SheetContent, SheetHeader, SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -95,14 +95,15 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
       : [];
 
   return (
-    <Sheet open={open} onOpenChange={v => !v && onClose()}>
-      <SheetContent side="right" className="w-full max-w-3xl overflow-y-auto">
-        <SheetHeader className="mb-4">
-          <SheetTitle className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-5xl w-full max-h-[90vh] flex flex-col p-0">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+          <DialogTitle className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-primary" />
             批次标注结果
-          </SheetTitle>
-        </SheetHeader>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="overflow-y-auto flex-1 px-6 py-4">
 
         {isLoading ? (
           <div className="space-y-3">
@@ -199,8 +200,9 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
             </div>
           </>
         )}
-      </SheetContent>
-    </Sheet>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
