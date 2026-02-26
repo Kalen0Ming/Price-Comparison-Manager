@@ -1,3 +1,21 @@
+// Detach esbuild from our process group so SIGHUP never reaches it.
+// Uses createRequire so the patch applies to every caller via the CJS module cache.
+import { createRequire as _cr } from "module";
+const _rq = _cr(import.meta.url);
+const _cp = _rq("child_process");
+const _spawn = _cp.spawn;
+_cp.spawn = function (...args: any[]) {
+  const cmd = args[0];
+  if (typeof cmd === "string" && cmd.includes("esbuild")) {
+    args[2] = { ...(args[2] || {}), detached: true };
+  }
+  const child = _spawn.apply(this, args);
+  if (typeof cmd === "string" && cmd.includes("esbuild") && child.unref) {
+    child.unref();
+  }
+  return child;
+};
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -9,20 +27,7 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[server] unhandledRejection:", reason);
 });
-
-// Keep server alive when terminal disconnects (SIGHUP).
-// esbuild (a Go binary) resets SIG_IGN on startup so it always dies on SIGHUP.
-// Vite's customLogger then calls process.exit(1) — we intercept that here too,
-// allowing Vite to restart esbuild transparently on the next request.
 process.on("SIGHUP", () => {});
-const _exit = process.exit.bind(process);
-(process as any).exit = (code?: number) => {
-  if (code === 1) {
-    console.warn("[server] Suppressed process.exit(1) — esbuild will restart on next request");
-    return;
-  }
-  _exit(code);
-};
 
 
 const app = express();
