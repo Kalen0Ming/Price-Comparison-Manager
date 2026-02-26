@@ -3,6 +3,16 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
+process.on("uncaughtException", (err) => {
+  console.error("[server] uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection:", reason);
+});
+process.on("SIGHUP", () => {
+  // Ignore SIGHUP (terminal disconnect) so the dev server keeps running
+});
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -50,7 +60,8 @@ app.use((req, res, next) => {
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        const jsonStr = JSON.stringify(capturedJsonResponse);
+        logLine += ` :: ${jsonStr.length > 200 ? jsonStr.slice(0, 200) + "…" : jsonStr}`;
       }
 
       log(logLine);

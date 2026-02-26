@@ -88,10 +88,23 @@
 - 对话框内显示数坊同步状态（成功/未配置/失败）
 - API：`POST /api/experiments/:id/archive`
 
+## 实验编码
+新建实验时，后端自动生成唯一编码，格式：`EXP-{YYYYMMDD}-{PRIORITY}-{6位随机大写字母数字}`，例：`EXP-20260226-P2-A3F9KR`。创建表单不含编码输入框，编码由服务器端生成。
+
+## 侧边栏 Logo
+侧边栏左上角内嵌 SVG Logo：蓝色（#2563EB）圆角方块 + 白色对勾，旁边为平台名称"数据标注实验平台"和当前用户角色标签。
+
+## 标注工作台截止时间倒计时
+标注工作台头部显示实验截止时间 + 实时倒计时（每秒刷新）。颜色规则：>3天 灰色；1-3天 amber；<24h 红色加粗；已超期 红色背景。
+
 ## 后台定时任务
 - 每小时检查 in_progress 实验的 deadline
 - 距截止 ≤24h 生成 warning 通知，≤1h 生成 urgent 通知
 - 只针对有未完成任务的标注员
+
+## 运行环境
+- Workflow 命令：`setsid npm run dev`（通过 setsid 创建新会话，防止 Replit 发送的 SIGHUP 信号传播至 esbuild 子进程导致崩溃）
+- `server/index.ts` 中设置了 `SIGHUP` 信号忽略处理器
 
 ## 关键文件
 - `shared/schema.ts` - 全部数据库表定义和 TypeScript 类型
