@@ -155,12 +155,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createExperiment(exp: InsertExperiment): Promise<Experiment> {
-    const [newExp] = await db.insert(experiments).values(exp).returning();
+    const [newExp] = await db.insert(experiments).values(exp as any).returning();
     return newExp;
   }
 
   async updateExperiment(id: number, updates: UpdateExperimentRequest): Promise<Experiment> {
-    const [updated] = await db.update(experiments).set(updates).where(eq(experiments.id, id)).returning();
+    const [updated] = await db.update(experiments).set(updates as any).where(eq(experiments.id, id)).returning();
     return updated;
   }
 
@@ -296,7 +296,7 @@ export class DatabaseStorage implements IStorage {
     const myTasks = await db.select().from(tasks).where(eq(tasks.assignedTo, userId));
     const expIdSet = new Set(myTasks.map(t => t.experimentId));
     const result = [];
-    for (const eid of expIdSet) {
+    for (const eid of Array.from(expIdSet)) {
       const exp = await this.getExperiment(eid);
       if (!exp) continue;
       const expTasks = myTasks.filter(t => t.experimentId === eid);
@@ -519,7 +519,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUserGroup(group: InsertUserGroup): Promise<UserGroup> {
-    const [g] = await db.insert(userGroups).values(group).returning();
+    const [g] = await db.insert(userGroups).values(group as any).returning();
     return g;
   }
 

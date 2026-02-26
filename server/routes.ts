@@ -14,7 +14,7 @@ const uploadRowCache = new Map<string, { rows: Record<string, unknown>[]; ts: nu
 const UPLOAD_TTL = 30 * 60 * 1000;
 function cleanUploadCache() {
   const now = Date.now();
-  for (const [k, v] of uploadRowCache.entries()) {
+  for (const [k, v] of Array.from(uploadRowCache.entries())) {
     if (now - v.ts > UPLOAD_TTL) uploadRowCache.delete(k);
   }
 }

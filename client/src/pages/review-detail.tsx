@@ -268,11 +268,11 @@ export default function ReviewDetail() {
                   <span className={`text-xs font-bold px-2 py-0.5 rounded ${side === "A" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
                     商品 {side}
                   </span>
-                  {data[sourceKey] && <span className="text-xs text-muted-foreground">{String(data[sourceKey])}</span>}
+                  {!!data[sourceKey] && <span className="text-xs text-muted-foreground">{String(data[sourceKey])}</span>}
                 </div>
                 <p className="font-semibold text-foreground">{String(data[nameKey] || "—")}</p>
-                {data[priceKey] && (
-                  <p className="text-2xl font-bold text-foreground mt-2">¥{data[priceKey]}</p>
+                {!!data[priceKey] && (
+                  <p className="text-2xl font-bold text-foreground mt-2">¥{String(data[priceKey])}</p>
                 )}
               </CardContent>
             </Card>
@@ -430,7 +430,7 @@ export default function ReviewDetail() {
               </div>
 
               {/* Final Result (if completed) */}
-              {isCompleted && task.finalResult && (
+              {isCompleted && !!task.finalResult && (
                 <>
                   <Separator className="my-4" />
                   <div>
