@@ -10,6 +10,20 @@ process.on("unhandledRejection", (reason) => {
   console.error("[server] unhandledRejection:", reason);
 });
 
+// Keep server alive when terminal disconnects (SIGHUP).
+// esbuild (a Go binary) resets SIG_IGN on startup so it always dies on SIGHUP.
+// Vite's customLogger then calls process.exit(1) — we intercept that here too,
+// allowing Vite to restart esbuild transparently on the next request.
+process.on("SIGHUP", () => {});
+const _exit = process.exit.bind(process);
+(process as any).exit = (code?: number) => {
+  if (code === 1) {
+    console.warn("[server] Suppressed process.exit(1) — esbuild will restart on next request");
+    return;
+  }
+  _exit(code);
+};
+
 
 const app = express();
 const httpServer = createServer(app);

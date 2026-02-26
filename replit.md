@@ -103,8 +103,10 @@
 - 只针对有未完成任务的标注员
 
 ## 运行环境
-- Workflow 命令：`setsid npm run dev`（通过 setsid 创建新会话，防止 Replit 发送的 SIGHUP 信号传播至 esbuild 子进程导致崩溃）
-- `server/index.ts` 中设置了 `SIGHUP` 信号忽略处理器
+- Workflow 命令：`bash -c 'trap "" HUP; exec npm run dev'`（bash 级 SIGHUP 屏蔽，同时留在 Replit 监控的进程组中以保证端口检测正常）
+- `server/index.ts` 中的稳定性保护：
+  1. `process.on('SIGHUP', () => {})` — 防止 Node.js 主进程因 SIGHUP 退出
+  2. `process.exit` 拦截（code === 1）— esbuild 是 Go 二进制，Go runtime 会重置 SIG_IGN，因此 esbuild 仍会被 SIGHUP 杀死；Vite 的 customLogger 随后调用 `process.exit(1)`，这里拦截该调用以保持服务器存活，Vite 会在下次请求时自动重启 esbuild
 
 ## 关键文件
 - `shared/schema.ts` - 全部数据库表定义和 TypeScript 类型
