@@ -29,27 +29,8 @@ async function triggerReviewCheck(taskId: number, experimentId: number) {
     const roll = Math.random() * 100;
     if (roll > exp.reviewRatio) return; // not selected
 
-    // Find a reviewer (admin user or any non-annotator)
-    const allUsers = await storage.getUsers();
-    const reviewers = allUsers.filter(u => u.role === "admin" || u.role === "reviewer");
-    if (reviewers.length === 0) return;
-
-    // Round-robin: pick reviewer with fewest pending review tasks
-    let selectedReviewer = reviewers[0];
-    let minPending = Infinity;
-    for (const reviewer of reviewers) {
-      const reviewTasks = await storage.getMyReviewTasks(reviewer.id);
-      if (reviewTasks.length < minPending) {
-        minPending = reviewTasks.length;
-        selectedReviewer = reviewer;
-      }
-    }
-
-    // Update task to needs_review and assign reviewer
-    await storage.updateTask(taskId, {
-      status: "needs_review",
-      reviewedBy: selectedReviewer.id,
-    } as any);
+    // Mark as needs_review; admin will manually assign a reviewer
+    await storage.updateTask(taskId, { status: "needs_review" } as any);
   } catch (e) {
     console.error("Review trigger error:", e);
   }
@@ -514,6 +495,76 @@ export async function registerRoutes(
       res.json({ reset: count });
     } catch {
       res.status(500).json({ message: "Reset failed" });
+    }
+  });
+
+  // Review task assignment: manual (assign N unassigned review tasks to a specific user)
+  app.post("/api/experiments/:id/assign-review", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const { userId, count } = z.object({
+        userId: z.number(),
+        count: z.number().min(1),
+      }).parse(req.body);
+      const allTasks = await storage.getTasks(expId);
+      const unassigned = allTasks.filter(t => t.status === "needs_review" && !t.reviewedBy);
+      const toAssign = unassigned.slice(0, count);
+      for (const t of toAssign) {
+        await storage.updateTask(t.id, { reviewedBy: userId } as any);
+      }
+      const exp = await storage.getExperiment(expId);
+      const deadlineStr = exp?.deadline ? `截止时间：${new Date(exp.deadline).toLocaleString("zh-CN")}` : "（无截止时间）";
+      if (toAssign.length > 0) {
+        await storage.createNotification({
+          userId,
+          title: "你有新的复核任务",
+          message: `实验「${exp?.name ?? expId}」已为你分配了 ${toAssign.length} 条复核任务，${deadlineStr}，请前往【我的任务】完成复核。`,
+          type: "info",
+          isRead: false,
+          experimentId: expId,
+        });
+      }
+      res.json({ assigned: toAssign.length });
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // Review task assignment: random (distribute unassigned review tasks among selected users)
+  app.post("/api/experiments/:id/assign-review-random", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const { userIds } = z.object({
+        userIds: z.array(z.number()).min(1),
+      }).parse(req.body);
+      const allTasks = await storage.getTasks(expId);
+      const unassigned = allTasks.filter(t => t.status === "needs_review" && !t.reviewedBy);
+      // Shuffle then round-robin distribute
+      const shuffled = [...unassigned].sort(() => Math.random() - 0.5);
+      const distribution: Record<number, number> = {};
+      for (let i = 0; i < shuffled.length; i++) {
+        const uid = userIds[i % userIds.length];
+        await storage.updateTask(shuffled[i].id, { reviewedBy: uid } as any);
+        distribution[uid] = (distribution[uid] ?? 0) + 1;
+      }
+      const exp = await storage.getExperiment(expId);
+      const deadlineStr = exp?.deadline ? `截止时间：${new Date(exp.deadline).toLocaleString("zh-CN")}` : "（无截止时间）";
+      for (const uid of userIds) {
+        const cnt = distribution[uid] ?? 0;
+        if (cnt > 0) {
+          await storage.createNotification({
+            userId: uid,
+            title: "你有新的复核任务",
+            message: `实验「${exp?.name ?? expId}」已为你分配了 ${cnt} 条复核任务，${deadlineStr}，请前往【我的任务】完成复核。`,
+            type: "info",
+            isRead: false,
+            experimentId: expId,
+          });
+        }
+      }
+      res.json({ assigned: shuffled.length, distribution });
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
     }
   });
 
