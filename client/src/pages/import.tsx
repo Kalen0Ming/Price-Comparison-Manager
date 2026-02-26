@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -23,9 +24,19 @@ export default function ImportPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const search = useSearch();
 
   const [step, setStep] = useState<Step>("upload");
-  const [selectedExperimentId, setSelectedExperimentId] = useState<string>("");
+  const [selectedExperimentId, setSelectedExperimentId] = useState<string>(() => {
+    const params = new URLSearchParams(search);
+    return params.get("experimentId") ?? "";
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const expId = params.get("experimentId");
+    if (expId) setSelectedExperimentId(expId);
+  }, [search]);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [isDragging, setIsDragging] = useState(false);

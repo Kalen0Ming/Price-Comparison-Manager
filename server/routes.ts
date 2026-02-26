@@ -188,6 +188,43 @@ export async function registerRoutes(
     res.json(await storage.getExperimentStats(Number(req.params.id)));
   });
 
+  app.get("/api/experiments/:id/result-stats", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const [stats, allAnnotations] = await Promise.all([
+        storage.getExperimentStats(expId),
+        storage.getAnnotations(),
+      ]);
+      const allTasksForExp = await storage.getTasks(expId);
+      const expTaskIdSet = new Set(allTasksForExp.map(t => t.id));
+      const expAnnotations = allAnnotations.filter(a => expTaskIdSet.has(a.taskId));
+      const reviewedTaskIds = Array.from(new Set(expAnnotations.filter(a => a.type === "review").map(a => a.taskId)));
+      let reviewedCount = 0;
+      let matchedCount = 0;
+      for (const tid of reviewedTaskIds) {
+        const taskAnns = expAnnotations.filter(a => a.taskId === tid);
+        const initial = taskAnns.find(a => a.type === "initial");
+        const review = taskAnns.find(a => a.type === "review");
+        if (!initial || !review) continue;
+        reviewedCount++;
+        if (!detectConflict(initial.result as Record<string, unknown>, review.result as Record<string, unknown>)) {
+          matchedCount++;
+        }
+      }
+      res.json({
+        totalTasks: stats.totalTasks,
+        completedTasks: stats.completedTasks,
+        annotatedTasks: stats.annotatedTasks + stats.needsReviewTasks + stats.completedTasks,
+        reviewedCount,
+        matchedCount,
+        accuracy: reviewedCount > 0 ? Math.round((matchedCount / reviewedCount) * 100) : null,
+        completionRate: stats.totalTasks > 0 ? Math.round(((stats.annotatedTasks + stats.needsReviewTasks + stats.completedTasks) / stats.totalTasks) * 100) : 0,
+      });
+    } catch (e) {
+      res.status(500).json({ message: "Failed to load result stats" });
+    }
+  });
+
   app.post(api.experiments.create.path, async (req, res) => {
     try {
       const schema = z.object({
@@ -868,7 +905,9 @@ export async function registerRoutes(
       // Filters
       const dateFrom = req.query.dateFrom ? new Date(req.query.dateFrom as string) : new Date(now - 30 * dayMs);
       const dateTo = req.query.dateTo ? new Date(req.query.dateTo as string) : new Date(now + dayMs);
-      const annotatorId = req.query.annotatorId ? Number(req.query.annotatorId) : null;
+      const annotatorIdParam = req.query.annotatorId ? String(req.query.annotatorId) : null;
+      const annotatorIds = annotatorIdParam ? annotatorIdParam.split(",").map(Number).filter(n => !isNaN(n)) : null;
+      const annotatorId = annotatorIds && annotatorIds.length === 1 ? annotatorIds[0] : null;
       const expSearch = req.query.experimentCode ? String(req.query.experimentCode).toLowerCase() : null;
       const selfOnly = req.query.selfOnly === "true" ? Number(req.query.selfOnly === "true" ? req.query.userId : null) : null;
       const userId = req.query.userId ? Number(req.query.userId) : null;
@@ -900,7 +939,7 @@ export async function registerRoutes(
 
       // Filter annotators
       let annotatorPool = allUsers.filter(u => u.role === "annotator");
-      if (annotatorId) annotatorPool = annotatorPool.filter(u => u.id === annotatorId);
+      if (annotatorIds && annotatorIds.length > 0) annotatorPool = annotatorPool.filter(u => annotatorIds.includes(u.id));
       if (userId && req.query.selfOnly === "true") annotatorPool = annotatorPool.filter(u => u.id === userId);
 
       const userEfficiency = annotatorPool.map(user => {
@@ -923,7 +962,7 @@ export async function registerRoutes(
         const initialAnn = taskAnns.find(a => a.type === "initial");
         const reviewAnn = taskAnns.find(a => a.type === "review");
         if (!initialAnn || !reviewAnn) continue;
-        if (annotatorId && initialAnn.userId !== annotatorId) continue;
+        if (annotatorIds && annotatorIds.length > 0 && !annotatorIds.includes(initialAnn.userId)) continue;
         if (userId && req.query.selfOnly === "true" && initialAnn.userId !== userId) continue;
         const uid = initialAnn.userId;
         if (!accuracyByUser[uid]) accuracyByUser[uid] = { total: 0, matched: 0 };

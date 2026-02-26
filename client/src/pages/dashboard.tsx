@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   FlaskConical, Users, CheckSquare, Tags, TrendingUp, Award, Settings2, Eye, EyeOff, Filter, X,
 } from "lucide-react";
@@ -145,7 +147,7 @@ export default function Dashboard() {
 
   const [dateFrom, setDateFrom] = useState(DEFAULT_DATE_FROM);
   const [dateTo, setDateTo] = useState(DEFAULT_DATE_TO);
-  const [annotatorId, setAnnotatorId] = useState<string>("all");
+  const [annotatorIds, setAnnotatorIds] = useState<string[]>([]);
   const [experimentCode, setExperimentCode] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
@@ -155,17 +157,17 @@ export default function Dashboard() {
     const p = new URLSearchParams();
     if (dateFrom) p.set("dateFrom", new Date(dateFrom).toISOString());
     if (dateTo) p.set("dateTo", new Date(dateTo + "T23:59:59").toISOString());
-    if (annotatorId && annotatorId !== "all") p.set("annotatorId", annotatorId);
+    if (annotatorIds.length > 0) p.set("annotatorId", annotatorIds.join(","));
     if (experimentCode) p.set("experimentCode", experimentCode);
     if (isAnnotator && currentUser?.id) {
       p.set("selfOnly", "true");
       p.set("userId", String(currentUser.id));
     }
     return p.toString();
-  }, [dateFrom, dateTo, annotatorId, experimentCode, isAnnotator, currentUser?.id]);
+  }, [dateFrom, dateTo, annotatorIds, experimentCode, isAnnotator, currentUser?.id]);
 
   const { data: overview, isLoading: overviewLoading } = useQuery<OverviewStats>({
-    queryKey: ["/api/stats/overview", dateFrom, dateTo, annotatorId, experimentCode, currentUser?.id],
+    queryKey: ["/api/stats/overview", dateFrom, dateTo, annotatorIds.join(","), experimentCode, currentUser?.id],
     queryFn: async () => {
       const r = await fetch(`/api/stats/overview?${buildParams()}`);
       return r.json();
@@ -173,13 +175,19 @@ export default function Dashboard() {
     refetchInterval: 30000,
   });
 
-  const hasActiveFilters = dateFrom !== DEFAULT_DATE_FROM || dateTo !== DEFAULT_DATE_TO || annotatorId !== "all" || experimentCode !== "";
+  const hasActiveFilters = dateFrom !== DEFAULT_DATE_FROM || dateTo !== DEFAULT_DATE_TO || annotatorIds.length > 0 || experimentCode !== "";
 
   const resetFilters = () => {
     setDateFrom(DEFAULT_DATE_FROM);
     setDateTo(DEFAULT_DATE_TO);
-    setAnnotatorId("all");
+    setAnnotatorIds([]);
     setExperimentCode("");
+  };
+
+  const toggleAnnotator = (id: string) => {
+    setAnnotatorIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   };
 
   // Summary stats - annotators see their own data
@@ -278,18 +286,47 @@ export default function Dashboard() {
               </div>
               {!isAnnotator && (
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">标注员</Label>
-                  <Select value={annotatorId} onValueChange={setAnnotatorId}>
-                    <SelectTrigger data-testid="select-filter-annotator">
-                      <SelectValue placeholder="全部标注员" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部标注员</SelectItem>
-                      {annotators.map(u => (
-                        <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs text-muted-foreground">标注员（可多选）</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start font-normal text-sm h-10"
+                        data-testid="button-filter-annotator"
+                      >
+                        {annotatorIds.length === 0
+                          ? <span className="text-muted-foreground">全部标注员</span>
+                          : <span>已选 {annotatorIds.length} 位标注员</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-2" align="start">
+                      <div className="space-y-1">
+                        <button
+                          className="w-full text-left text-xs text-muted-foreground px-2 py-1 hover:text-foreground"
+                          onClick={() => setAnnotatorIds([])}
+                        >
+                          清除选择
+                        </button>
+                        {annotators.map(u => (
+                          <div
+                            key={u.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted cursor-pointer"
+                            onClick={() => toggleAnnotator(String(u.id))}
+                          >
+                            <Checkbox
+                              checked={annotatorIds.includes(String(u.id))}
+                              onCheckedChange={() => toggleAnnotator(String(u.id))}
+                              data-testid={`checkbox-annotator-${u.id}`}
+                            />
+                            <span className="text-sm">{u.username}</span>
+                          </div>
+                        ))}
+                        {annotators.length === 0 && (
+                          <p className="text-xs text-muted-foreground px-2 py-1">暂无标注员</p>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               )}
               <div className="space-y-1.5">
@@ -305,7 +342,7 @@ export default function Dashboard() {
             {hasActiveFilters && (
               <p className="text-xs text-muted-foreground mt-3">
                 当前筛选：{dateFrom} 至 {dateTo}
-                {annotatorId && annotatorId !== "all" && ` · 标注员 #${annotatorId}`}
+                {annotatorIds.length > 0 && ` · ${annotatorIds.length} 位标注员`}
                 {experimentCode && ` · 搜索"${experimentCode}"`}
               </p>
             )}

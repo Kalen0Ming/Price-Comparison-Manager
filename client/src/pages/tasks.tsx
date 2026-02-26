@@ -25,6 +25,16 @@ type BatchResult = {
   tasks: (Task & { annotation: Annotation | null; annotatorName: string | null })[];
 };
 
+type ExperimentResultStats = {
+  totalTasks: number;
+  completedTasks: number;
+  annotatedTasks: number;
+  reviewedCount: number;
+  matchedCount: number;
+  accuracy: number | null;
+  completionRate: number;
+};
+
 const ASSIGN_TYPE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
   auto: { label: "自动分配", bg: "bg-blue-100", text: "text-blue-700" },
   manual: { label: "手动分配", bg: "bg-purple-100", text: "text-purple-700" },
@@ -71,6 +81,19 @@ function AnnotationResultDisplay({ result, template }: {
   );
 }
 
+function AccuracyRing({ value }: { value: number }) {
+  const color = value >= 80 ? "text-emerald-600" : value >= 60 ? "text-amber-500" : "text-red-500";
+  const barColor = value >= 80 ? "bg-emerald-500" : value >= 60 ? "bg-amber-400" : "bg-red-400";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${value}%` }} />
+      </div>
+      <span className={`text-sm font-bold tabular-nums ${color}`}>{value}%</span>
+    </div>
+  );
+}
+
 function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; open: boolean; onClose: () => void }) {
   const { data, isLoading } = useQuery<BatchResult>({
     queryKey: ["/api/task-batches", batchId, "results"],
@@ -79,6 +102,15 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
       return res.json();
     },
     enabled: open && batchId !== null,
+  });
+
+  const { data: expStats } = useQuery<ExperimentResultStats>({
+    queryKey: ["/api/experiments", data?.experiment?.id, "result-stats"],
+    queryFn: async () => {
+      const res = await fetch(`/api/experiments/${data!.experiment!.id}/result-stats`);
+      return res.json();
+    },
+    enabled: !!data?.experiment?.id,
   });
 
   const tasks = data?.tasks ?? [];
@@ -113,7 +145,7 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
           <p className="text-muted-foreground text-sm">无法加载批次数据</p>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 mb-5">
+            <div className="grid grid-cols-2 gap-3 mb-4">
               <div className="bg-muted/50 rounded-lg p-3">
                 <p className="text-xs text-muted-foreground mb-0.5">批次编码</p>
                 <p className="font-mono font-semibold text-xs">{data.batch.code}</p>
@@ -129,7 +161,7 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
                 </p>
               </div>
               <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-xs text-muted-foreground mb-0.5">完成进度</p>
+                <p className="text-xs text-muted-foreground mb-0.5">批次完成进度</p>
                 <p className="font-bold text-primary text-sm">{pct}%（{annotated}/{tasks.length}）</p>
               </div>
             </div>
@@ -140,6 +172,39 @@ function BatchResultSheet({ batchId, open, onClose }: { batchId: number | null; 
                 style={{ width: `${pct}%` }}
               />
             </div>
+
+            {expStats && (
+              <div className="mb-5 rounded-xl border border-border bg-gradient-to-br from-slate-50 to-white p-4">
+                <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wide">实验整体结果指标</p>
+                <div className="grid grid-cols-3 gap-4 mb-3">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-foreground">{expStats.totalTasks}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">实验总任务数</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-indigo-600">{expStats.annotatedTasks}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">已标注完成数</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-emerald-600">{expStats.completionRate}%</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">总体完成率</p>
+                  </div>
+                </div>
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs font-medium text-foreground">复核准确率</p>
+                    <span className="text-xs text-muted-foreground">
+                      {expStats.reviewedCount > 0 ? `${expStats.matchedCount}/${expStats.reviewedCount} 一致` : "暂无复核数据"}
+                    </span>
+                  </div>
+                  {expStats.accuracy !== null ? (
+                    <AccuracyRing value={expStats.accuracy} />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">此实验未开启复核或尚无复核记录</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="border rounded-lg overflow-hidden">
               <div className="overflow-x-auto">
@@ -238,10 +303,10 @@ export default function TaskBatchesPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
           <Layers className="w-8 h-8 text-primary" />
-          分配批次管理
+          实验结果列表
         </h1>
         <p className="text-muted-foreground mt-1">
-          查询每次任务分配产生的批次记录，点击「查看结果」查看该批次的完整标注情况。
+          查看每次任务分配产生的批次记录，点击「查看结果」可查看该实验的完整标注情况与结果指标。
         </p>
       </div>
 

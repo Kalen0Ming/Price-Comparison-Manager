@@ -101,8 +101,8 @@ function ExperimentForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description">实验描述</Label>
-        <Textarea id="description" {...form.register("description")} placeholder="为标注员提供说明和背景信息..." className="resize-none h-20" data-testid="textarea-description" />
+        <Label htmlFor="description">实验规则描述</Label>
+        <Textarea id="description" {...form.register("description")} placeholder="为标注员提供规则说明和背景信息..." className="resize-none h-20" data-testid="textarea-description" />
       </div>
 
       <div className="space-y-2">
@@ -135,7 +135,7 @@ function ExperimentForm({
 
       <div className="flex items-center justify-between p-4 rounded-xl border border-border bg-slate-50">
         <div className="space-y-0.5">
-          <Label className="text-base">启用双人复核</Label>
+          <Label className="text-base">启用质检复核</Label>
           <p className="text-sm text-muted-foreground">按比例抽取任务进行第二次复核</p>
         </div>
         <Switch checked={form.watch("enableReview")} onCheckedChange={(checked) => form.setValue("enableReview", checked)} data-testid="switch-enable-review" />

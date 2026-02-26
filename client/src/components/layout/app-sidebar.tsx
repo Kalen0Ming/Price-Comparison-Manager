@@ -101,7 +101,7 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   <NavItem title="实验管理" url="/experiments" icon={FlaskConical} />
-                  <NavItem title="分配批次管理" url="/tasks" icon={CheckSquare} />
+                  <NavItem title="实验结果列表" url="/tasks" icon={CheckSquare} />
                 </SidebarMenu>
               </SidebarGroupContent>
             </>

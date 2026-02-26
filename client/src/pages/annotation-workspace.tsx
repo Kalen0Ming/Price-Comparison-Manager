@@ -15,7 +15,7 @@ import {
   ArrowUpDown, Equal, ArrowUp, ArrowDown, AlertCircle, ExternalLink, X, ZoomIn, Clock, AlertTriangle,
 } from "lucide-react";
 import { format } from "date-fns";
-import type { Task, Experiment, Annotation, AnnotationTemplate, AnnotationField, DisplayField } from "@shared/schema";
+import type { Task, Experiment, Annotation, AnnotationTemplate, AnnotationField, DisplayField, ExperimentWithPublisher } from "@shared/schema";
 
 const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|bmp|avif)(\?.*)?$/i;
 const IMAGE_CDN = /^https?:\/\/[^/]*(alicdn\.com|img\.alicdn|gw\.alicdn|img\d+\.alicdn|img-s-msn|picasso|sinaimg\.cn|qpic\.cn|bdimg\.com|mmbiz\.qpic|cdn\.shopify|imgur\.com|i\.imgur)/i;
@@ -118,7 +118,7 @@ function SmartValue({ value }: { value: unknown }) {
 }
 
 type TaskDetail = Task & {
-  experiment: Experiment | null;
+  experiment: ExperimentWithPublisher | null;
   template: AnnotationTemplate | null;
   existingAnnotation: Annotation | null;
 };
@@ -538,6 +538,22 @@ export default function AnnotationWorkspace() {
             {isAnnotated && <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"><CheckCircle className="w-3 h-3" /> 已完成</span>}
             {isDraft && <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"><Save className="w-3 h-3" /> 草稿</span>}
           </div>
+          {(task.experiment?.publisherName || task.experiment?.description) && (
+            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs text-muted-foreground">
+              {task.experiment.publisherName && (
+                <span className="flex items-center gap-1">
+                  <span className="font-medium text-foreground/70">发布人：</span>
+                  {task.experiment.publisherName}
+                </span>
+              )}
+              {task.experiment.description && (
+                <span className="flex items-center gap-1 max-w-xl">
+                  <span className="font-medium text-foreground/70 shrink-0">规则描述：</span>
+                  <span className="line-clamp-2">{task.experiment.description}</span>
+                </span>
+              )}
+            </div>
+          )}
           {task.experiment?.deadline && <DeadlineCountdown deadline={new Date(task.experiment.deadline)} />}
           {lastSaved && <p className="text-xs text-muted-foreground mt-1">最后保存：{lastSaved.toLocaleTimeString("zh-CN")}</p>}
         </div>

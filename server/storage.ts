@@ -243,7 +243,7 @@ export class DatabaseStorage implements IStorage {
 
   async bulkCreateTasks(taskList: InsertTask[]): Promise<number> {
     if (taskList.length === 0) return 0;
-    const chunkSize = 100;
+    const chunkSize = 500;
     let total = 0;
     for (let i = 0; i < taskList.length; i += chunkSize) {
       const chunk = taskList.slice(i, i + chunkSize);

@@ -579,7 +579,7 @@ export default function ExperimentDetail() {
                   <Database className="w-10 h-10 mx-auto mb-3 opacity-30" />
                   <p>该实验下暂无任务数据</p>
                   <Button variant="outline" size="sm" asChild className="mt-3">
-                    <Link href="/import">前往导入数据</Link>
+                    <Link href={`/import?experimentId=${id}`}>前往导入数据</Link>
                   </Button>
                 </div>
               ) : (
