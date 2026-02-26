@@ -30,6 +30,7 @@ export const experiments = pgTable("experiments", {
   deadline: timestamp("deadline"),
   enableReview: boolean("enable_review").default(false).notNull(),
   reviewRatio: integer("review_ratio").default(0).notNull(),
+  reviewerPool: json("reviewer_pool").$type<number[]>(),
   status: text("status").notNull().default("draft"),
   templateId: integer("template_id"),
   createdBy: integer("created_by"),

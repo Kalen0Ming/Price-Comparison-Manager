@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, BarChart2, ClipboardList, Clock, CheckCircle, AlertCircle, AlertTriangle, Database, UserPlus, Shuffle, Users, ShieldCheck, Gavel, ChevronRight, Archive, Download, Loader2, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
-import type { Experiment, ExperimentStats, User, Task, Annotation } from "@shared/schema";
+import type { Experiment, ExperimentStats, User, Task, Annotation, UserGroup } from "@shared/schema";
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -147,24 +147,122 @@ function ManualAssignDialog({ expId, tasks, users }: { expId: number; tasks: Tas
   );
 }
 
-// Random assignment dialog
-function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Task[]; users: User[] }) {
+// Shared helper for user/group picker list
+function PickerUserList({
+  users, selected, onToggle, totalTasks,
+}: { users: User[]; selected: number[]; onToggle: (id: number) => void; totalTasks?: number }) {
+  return (
+    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+      {users.length === 0 && <p className="text-xs text-muted-foreground text-center py-3">暂无标注员账号</p>}
+      {users.map(u => (
+        <div
+          key={u.id}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${selected.includes(u.id) ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}
+          onClick={() => onToggle(u.id)}
+          data-testid={`option-user-${u.id}`}
+        >
+          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${selected.includes(u.id) ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+            {selected.includes(u.id) && <CheckCircle className="w-3 h-3" />}
+          </div>
+          <span className="text-sm font-medium flex-1">{u.username}</span>
+          {totalTasks !== undefined && selected.length > 0 && selected.includes(u.id) && (
+            <span className="text-xs text-muted-foreground">≈ {Math.ceil(totalTasks / selected.length)} 个</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PickerGroupList({
+  groups, selected, onToggle,
+}: { groups: UserGroup[]; selected: number[]; onToggle: (id: number) => void }) {
+  return (
+    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+      {groups.length === 0 && <p className="text-xs text-muted-foreground text-center py-3">暂无用户组，请先在用户管理中创建</p>}
+      {groups.map(g => (
+        <div
+          key={g.id}
+          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${selected.includes(g.id) ? "border-primary bg-primary/5" : "border-border hover:border-primary/30"}`}
+          onClick={() => onToggle(g.id)}
+          data-testid={`option-group-${g.id}`}
+        >
+          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${selected.includes(g.id) ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
+            {selected.includes(g.id) && <CheckCircle className="w-3 h-3" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">{g.name}</p>
+            <p className="text-xs text-muted-foreground">{(g.userIds as number[]).length} 名成员</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ModeToggle({ mode, onChange }: { mode: "users" | "groups"; onChange: (m: "users" | "groups") => void }) {
+  return (
+    <div className="flex rounded-md border overflow-hidden text-xs h-7">
+      <button
+        type="button"
+        className={`px-3 transition-colors ${mode === "users" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+        onClick={() => onChange("users")}
+      >个人</button>
+      <button
+        type="button"
+        className={`px-3 border-l transition-colors ${mode === "groups" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+        onClick={() => onChange("groups")}
+      >用户组</button>
+    </div>
+  );
+}
+
+// Random assignment dialog — supports user groups + reviewer pool pre-selection
+function RandomAssignDialog({
+  expId, tasks, users, userGroups, experiment,
+}: { expId: number; tasks: Task[]; users: User[]; userGroups: UserGroup[]; experiment: Experiment | undefined }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
+  const [annotatorMode, setAnnotatorMode] = useState<"users" | "groups">("users");
+  const [reviewerMode, setReviewerMode] = useState<"users" | "groups">("users");
+  const [annotatorUsers, setAnnotatorUsers] = useState<number[]>([]);
+  const [annotatorGroups, setAnnotatorGroups] = useState<number[]>([]);
+  const [reviewerUsers, setReviewerUsers] = useState<number[]>([]);
+  const [reviewerGroups, setReviewerGroups] = useState<number[]>([]);
 
-  const annotators = users.filter(u => u.role === "annotator" || u.role === "reviewer");
+  const annotatorList = users.filter(u => u.role === "annotator" || u.role === "reviewer");
   const unassignedTasks = tasks.filter(t => !t.assignedTo && t.status !== "annotated");
+
+  // Compute effective annotator count for display
+  const effectiveAnnotatorIds = Array.from(new Set([
+    ...annotatorUsers,
+    ...annotatorGroups.flatMap(gid => {
+      const g = userGroups.find(g => g.id === gid);
+      return g ? (g.userIds as number[]) : [];
+    }),
+  ]));
+
+  const toggle = (set: number[], setFn: (v: number[]) => void, id: number) => {
+    setFn(set.includes(id) ? set.filter(x => x !== id) : [...set, id]);
+  };
 
   const randomMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/experiments/${expId}/assign-random`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userIds: selectedUsers }),
+        body: JSON.stringify({
+          userIds: annotatorUsers,
+          groupIds: annotatorGroups,
+          reviewerUserIds: reviewerUsers,
+          reviewerGroupIds: reviewerGroups,
+        }),
       });
-      if (!res.ok) throw new Error("分配失败");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "分配失败");
+      }
       return res.json() as Promise<{ assigned: number; distribution: Record<number, number> }>;
     },
     onSuccess: (data) => {
@@ -176,15 +274,14 @@ function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Tas
         .join("，");
       toast({ title: `随机分配成功，共 ${data.assigned} 个任务`, description: distStr });
       queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks", expId] });
       setOpen(false);
     },
-    onError: () => toast({ variant: "destructive", title: "分配失败" }),
+    onError: (e: Error) => toast({ variant: "destructive", title: "分配失败", description: e.message }),
   });
 
-  const toggleUser = (id: number) => {
-    setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const canSubmit = effectiveAnnotatorIds.length > 0 && unassignedTasks.length > 0 && !randomMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -194,50 +291,77 @@ function RandomAssignDialog({ expId, tasks, users }: { expId: number; tasks: Tas
           随机分配
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>随机均匀分配任务</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 pt-2">
+        <div className="space-y-5 pt-2">
           <p className="text-sm text-muted-foreground">
             将 <span className="font-semibold text-foreground">{unassignedTasks.length}</span> 个未分配任务随机均匀地分配给所选标注员。
           </p>
+
+          {/* Annotator selection */}
           <div className="space-y-2">
-            <Label>选择参与的标注员（可多选）</Label>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {annotators.map(u => (
-                <div
-                  key={u.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedUsers.includes(u.id) ? "border-primary bg-primary/5" : "border-border"}`}
-                  onClick={() => toggleUser(u.id)}
-                  data-testid={`option-user-${u.id}`}
-                >
-                  <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${selectedUsers.includes(u.id) ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}>
-                    {selectedUsers.includes(u.id) && <CheckCircle className="w-3 h-3" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{u.username}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{u.role}</p>
-                  </div>
-                  {selectedUsers.length > 0 && selectedUsers.includes(u.id) && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      ≈ {Math.ceil(unassignedTasks.length / selectedUsers.length)} 个
-                    </span>
-                  )}
+            <div className="flex items-center justify-between">
+              <Label className="font-semibold">标注人员</Label>
+              <ModeToggle mode={annotatorMode} onChange={m => { setAnnotatorMode(m); setAnnotatorUsers([]); setAnnotatorGroups([]); }} />
+            </div>
+            {annotatorMode === "users" ? (
+              <PickerUserList
+                users={annotatorList}
+                selected={annotatorUsers}
+                onToggle={id => toggle(annotatorUsers, setAnnotatorUsers, id)}
+                totalTasks={unassignedTasks.length}
+              />
+            ) : (
+              <PickerGroupList
+                groups={userGroups}
+                selected={annotatorGroups}
+                onToggle={id => toggle(annotatorGroups, setAnnotatorGroups, id)}
+              />
+            )}
+            {effectiveAnnotatorIds.length > 0 && (
+              <p className="text-xs text-primary">已选 {effectiveAnnotatorIds.length} 名标注员，每人约 {Math.ceil(unassignedTasks.length / effectiveAnnotatorIds.length)} 个任务</p>
+            )}
+          </div>
+
+          {/* Reviewer pool selection (only when review enabled) */}
+          {experiment?.enableReview && (
+            <div className="space-y-2 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="font-semibold">复核人员池</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    标注员提交初标后，按 {experiment.reviewRatio}% 抽取自动分配给以下人员复核
+                  </p>
                 </div>
-              ))}
-              {annotators.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">暂无标注员账号，请先在用户管理中创建。</p>
+                <ModeToggle mode={reviewerMode} onChange={m => { setReviewerMode(m); setReviewerUsers([]); setReviewerGroups([]); }} />
+              </div>
+              {reviewerMode === "users" ? (
+                <PickerUserList
+                  users={annotatorList}
+                  selected={reviewerUsers}
+                  onToggle={id => toggle(reviewerUsers, setReviewerUsers, id)}
+                />
+              ) : (
+                <PickerGroupList
+                  groups={userGroups}
+                  selected={reviewerGroups}
+                  onToggle={id => toggle(reviewerGroups, setReviewerGroups, id)}
+                />
               )}
             </div>
-          </div>
+          )}
+
           <Button
             className="w-full"
-            disabled={selectedUsers.length === 0 || randomMutation.isPending || unassignedTasks.length === 0}
+            disabled={!canSubmit}
             onClick={() => randomMutation.mutate()}
             data-testid="button-confirm-random-assign"
           >
-            {randomMutation.isPending ? "分配中..." : `随机分配给 ${selectedUsers.length} 名标注员`}
+            {randomMutation.isPending
+              ? "分配中..."
+              : `随机分配给 ${effectiveAnnotatorIds.length} 名标注员`}
           </Button>
         </div>
       </DialogContent>
@@ -347,193 +471,6 @@ function ArchiveDialog({ expId, expName, expStatus }: { expId: number; expName: 
               )}
             </Button>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ManualAssignReviewDialog({ expId, tasks, users }: { expId: number; tasks: Task[]; users: User[] }) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<string>("");
-  const [count, setCount] = useState(5);
-
-  const unassigned = tasks.filter(t => t.status === "needs_review" && !t.reviewedBy);
-  const annotators = users.filter(u => u.role === "annotator" || u.role === "reviewer");
-
-  const assignMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/experiments/${expId}/assign-review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: Number(selectedUser), count }),
-      });
-      if (!res.ok) throw new Error("分配失败");
-      return res.json() as Promise<{ assigned: number }>;
-    },
-    onSuccess: (data) => {
-      const user = users.find(u => u.id === Number(selectedUser));
-      toast({ title: "复核分配成功", description: `已为「${user?.username}」分配 ${data.assigned} 个复核任务。` });
-      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks", expId] });
-      setOpen(false);
-    },
-    onError: () => toast({ variant: "destructive", title: "分配失败" }),
-  });
-
-  if (unassigned.length === 0) return null;
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="button-manual-assign-review">
-          <ShieldCheck className="w-4 h-4" />
-          手动分配复核
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>手动分配复核任务</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 pt-2">
-          <p className="text-sm text-muted-foreground">
-            当前有 <span className="font-semibold text-foreground">{unassigned.length}</span> 个待分配复核任务。
-          </p>
-          <div className="space-y-1.5">
-            <Label>选择执行复核的标注员</Label>
-            <Select value={selectedUser} onValueChange={setSelectedUser}>
-              <SelectTrigger data-testid="select-review-user">
-                <SelectValue placeholder="请选择标注员..." />
-              </SelectTrigger>
-              <SelectContent>
-                {annotators.map(u => (
-                  <SelectItem key={u.id} value={String(u.id)}>
-                    {u.username}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>分配数量（最多 {unassigned.length} 个）</Label>
-            <Input
-              type="number"
-              min={1}
-              max={unassigned.length}
-              value={count}
-              onChange={e => setCount(Number(e.target.value))}
-              data-testid="input-review-assign-count"
-            />
-          </div>
-          <Button
-            className="w-full"
-            disabled={!selectedUser || count < 1 || assignMutation.isPending}
-            onClick={() => assignMutation.mutate()}
-            data-testid="button-confirm-assign-review"
-          >
-            {assignMutation.isPending ? "分配中..." : `确认分配 ${Math.min(count, unassigned.length)} 个复核任务`}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function RandomAssignReviewDialog({ expId, tasks, users }: { expId: number; tasks: Task[]; users: User[] }) {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [selectedUsers, setSelectedUsers] = useState<number[]>([]);
-
-  const unassigned = tasks.filter(t => t.status === "needs_review" && !t.reviewedBy);
-  const annotators = users.filter(u => u.role === "annotator" || u.role === "reviewer");
-
-  const randomMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/experiments/${expId}/assign-review-random`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userIds: selectedUsers }),
-      });
-      if (!res.ok) throw new Error("分配失败");
-      return res.json() as Promise<{ assigned: number; distribution: Record<number, number> }>;
-    },
-    onSuccess: (data) => {
-      const distStr = Object.entries(data.distribution)
-        .map(([uid, cnt]) => {
-          const u = users.find(u => u.id === Number(uid));
-          return `${u?.username || uid}: ${cnt} 个`;
-        })
-        .join("，");
-      toast({ title: `随机分配复核成功，共 ${data.assigned} 个任务`, description: distStr });
-      queryClient.invalidateQueries({ queryKey: ["/api/experiments", expId, "stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks", expId] });
-      setOpen(false);
-    },
-    onError: () => toast({ variant: "destructive", title: "分配失败" }),
-  });
-
-  const toggleUser = (id: number) => {
-    setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-
-  if (unassigned.length === 0) return null;
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50" data-testid="button-random-assign-review">
-          <Shuffle className="w-4 h-4" />
-          随机分配复核
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>随机分配复核任务</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 pt-2">
-          <p className="text-sm text-muted-foreground">
-            将 <span className="font-semibold text-foreground">{unassigned.length}</span> 个复核任务随机均匀分配给所选标注员。
-          </p>
-          <div className="space-y-2">
-            <Label>选择执行复核的标注员（可多选）</Label>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {annotators.map(u => (
-                <div
-                  key={u.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${selectedUsers.includes(u.id) ? "border-violet-400 bg-violet-50" : "border-border"}`}
-                  onClick={() => toggleUser(u.id)}
-                  data-testid={`option-review-user-${u.id}`}
-                >
-                  <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${selectedUsers.includes(u.id) ? "border-violet-500 bg-violet-500 text-white" : "border-border"}`}>
-                    {selectedUsers.includes(u.id) && <CheckCircle className="w-3 h-3" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{u.username}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{u.role}</p>
-                  </div>
-                  {selectedUsers.length > 0 && selectedUsers.includes(u.id) && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      ≈ {Math.ceil(unassigned.length / selectedUsers.length)} 个
-                    </span>
-                  )}
-                </div>
-              ))}
-              {annotators.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-4">暂无标注员账号</p>
-              )}
-            </div>
-          </div>
-          <Button
-            className="w-full bg-violet-600 hover:bg-violet-700"
-            disabled={selectedUsers.length === 0 || randomMutation.isPending}
-            onClick={() => randomMutation.mutate()}
-            data-testid="button-confirm-random-assign-review"
-          >
-            {randomMutation.isPending ? "分配中..." : `随机分配给 ${selectedUsers.length} 名标注员`}
-          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -666,6 +603,14 @@ export default function ExperimentDetail() {
     },
   });
 
+  const { data: userGroups = [] } = useQuery<UserGroup[]>({
+    queryKey: ["/api/user-groups"],
+    queryFn: async () => {
+      const r = await fetch("/api/user-groups");
+      return r.json();
+    },
+  });
+
   const { data: reviewQueue = [], isLoading: reviewLoading } = useQuery<ReviewQueueItem[]>({
     queryKey: ["/api/experiments", expId, "review-queue"],
     queryFn: async () => {
@@ -708,13 +653,13 @@ export default function ExperimentDetail() {
             {/* Assignment & Archive Controls */}
             <div className="flex gap-2 flex-wrap">
               <ManualAssignDialog expId={expId} tasks={allTasks} users={users} />
-              <RandomAssignDialog expId={expId} tasks={allTasks} users={users} />
-              {experiment?.enableReview && (
-                <>
-                  <ManualAssignReviewDialog expId={expId} tasks={allTasks} users={users} />
-                  <RandomAssignReviewDialog expId={expId} tasks={allTasks} users={users} />
-                </>
-              )}
+              <RandomAssignDialog
+                expId={expId}
+                tasks={allTasks}
+                users={users}
+                userGroups={userGroups}
+                experiment={experiment}
+              />
               <ResetAssignDialog expId={expId} tasks={allTasks} expStatus={experiment?.status || ""} />
               <ArchiveDialog
                 expId={expId}
@@ -763,6 +708,31 @@ export default function ExperimentDetail() {
           </div>
         );
       })()}
+
+      {/* Reviewer pool info banner */}
+      {experiment?.enableReview && (
+        <div className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border mb-6 text-sm ${(experiment.reviewerPool as number[] | null)?.length ? "bg-violet-50 border-violet-200" : "bg-amber-50 border-amber-200"}`}>
+          <ShieldCheck className={`w-4 h-4 shrink-0 ${(experiment.reviewerPool as number[] | null)?.length ? "text-violet-600" : "text-amber-600"}`} />
+          <span className={(experiment.reviewerPool as number[] | null)?.length ? "text-violet-700 font-medium" : "text-amber-700 font-medium"}>
+            {(experiment.reviewerPool as number[] | null)?.length
+              ? `已配置复核人员池（${(experiment.reviewerPool as number[]).length} 人）：`
+              : "尚未配置复核人员池 — 请在「随机分配」时选择复核人员，否则抽中的任务将需手动指定"}
+          </span>
+          {(experiment.reviewerPool as number[] | null)?.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {(experiment.reviewerPool as number[]).map(uid => {
+                const u = users.find(u => u.id === uid);
+                return u ? (
+                  <span key={uid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-xs font-medium">
+                    {u.username}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          ) : null}
+          <span className="text-xs text-muted-foreground ml-auto">抽样比例 {experiment.reviewRatio}%</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Task Sample */}

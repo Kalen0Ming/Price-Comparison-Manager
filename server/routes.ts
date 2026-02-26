@@ -29,8 +29,25 @@ async function triggerReviewCheck(taskId: number, experimentId: number) {
     const roll = Math.random() * 100;
     if (roll > exp.reviewRatio) return; // not selected
 
-    // Mark as needs_review; admin will manually assign a reviewer
-    await storage.updateTask(taskId, { status: "needs_review" } as any);
+    const pool = (exp.reviewerPool as number[] | null) ?? [];
+    if (pool.length === 0) {
+      // No reviewer pool configured — just mark as needs_review for manual assignment
+      await storage.updateTask(taskId, { status: "needs_review" } as any);
+      return;
+    }
+
+    // Round-robin: pick reviewer from pool with fewest pending review tasks
+    let selectedReviewerId = pool[0];
+    let minPending = Infinity;
+    for (const uid of pool) {
+      const reviewTasks = await storage.getMyReviewTasks(uid);
+      if (reviewTasks.length < minPending) {
+        minPending = reviewTasks.length;
+        selectedReviewerId = uid;
+      }
+    }
+
+    await storage.updateTask(taskId, { status: "needs_review", reviewedBy: selectedReviewerId } as any);
   } catch (e) {
     console.error("Review trigger error:", e);
   }
@@ -415,44 +432,73 @@ export async function registerRoutes(
     }
   });
 
-  // Task assignment: random
+  // Task assignment: random (supports individual users + user groups; also saves reviewer pool)
   app.post("/api/experiments/:id/assign-random", async (req, res) => {
     try {
       const expId = Number(req.params.id);
-      const { userIds, count } = z.object({
-        userIds: z.array(z.number()),
+      const body = z.object({
+        userIds: z.array(z.number()).optional().default([]),
+        groupIds: z.array(z.number()).optional().default([]),
+        reviewerUserIds: z.array(z.number()).optional().default([]),
+        reviewerGroupIds: z.array(z.number()).optional().default([]),
         count: z.number().optional(),
       }).parse(req.body);
-      const result = await storage.assignTasksRandom(expId, userIds, count);
+
+      // Resolve annotator IDs from groups
+      let annotatorIds = [...body.userIds];
+      for (const gid of body.groupIds) {
+        const group = await storage.getUserGroup(gid);
+        if (group) annotatorIds = [...annotatorIds, ...(group.userIds as number[])];
+      }
+      annotatorIds = Array.from(new Set(annotatorIds));
+
+      // Resolve reviewer pool IDs from groups
+      let reviewerIds = [...body.reviewerUserIds];
+      for (const gid of body.reviewerGroupIds) {
+        const group = await storage.getUserGroup(gid);
+        if (group) reviewerIds = [...reviewerIds, ...(group.userIds as number[])];
+      }
+      reviewerIds = Array.from(new Set(reviewerIds));
+
+      if (annotatorIds.length === 0) {
+        return res.status(400).json({ message: "请至少选择一名标注员" });
+      }
+
+      // Save reviewer pool to experiment if provided
+      if (reviewerIds.length > 0) {
+        await storage.updateExperiment(expId, { reviewerPool: reviewerIds } as any);
+      }
+
+      const result = await storage.assignTasksRandom(expId, annotatorIds, body.count);
       const total = Object.values(result).reduce((a, b) => a + b, 0);
+
       // Create batch record
       const exp = await storage.getExperiment(expId);
       const now = new Date();
       const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
       const reviewFlag = exp?.enableReview ? "R" : "N";
-      const batchCode = `${ymd}-${total}T-${userIds.length}U-A-${reviewFlag}`;
+      const batchCode = `${ymd}-${total}T-${annotatorIds.length}U-A-${reviewFlag}`;
       const allExpTasks = await storage.getTasks(expId);
       const assignedTaskIds = allExpTasks
-        .filter(t => t.assignedTo && userIds.includes(t.assignedTo) && t.status === "assigned")
+        .filter(t => t.assignedTo && annotatorIds.includes(t.assignedTo) && t.status === "assigned")
         .map(t => t.id);
       const recentBatchIds = assignedTaskIds.slice(-total);
       const batch = await storage.createTaskBatch({
         code: batchCode,
         experimentId: expId,
         taskCount: total,
-        userCount: userIds.length,
+        userCount: annotatorIds.length,
         assignType: "auto",
         reviewEnabled: exp?.enableReview ?? false,
         taskIds: recentBatchIds as any,
-        assignedUserIds: userIds as any,
+        assignedUserIds: annotatorIds as any,
       });
-      // Update tasks with batchId
       for (const tid of recentBatchIds) {
         await storage.updateTask(tid, { batchId: batch.id } as any);
       }
-      // Notify each annotator
+      // Notify annotators
       const deadlineStr2 = exp?.deadline ? `截止时间：${new Date(exp.deadline).toLocaleString("zh-CN")}` : "（无截止时间）";
-      for (const uid of userIds) {
+      for (const uid of annotatorIds) {
         const userCount = result[uid] ?? 0;
         if (userCount > 0) {
           await storage.createNotification({
@@ -466,7 +512,8 @@ export async function registerRoutes(
         }
       }
       res.json({ assigned: total, distribution: result, batch });
-    } catch {
+    } catch (e) {
+      console.error(e);
       res.status(400).json({ message: "Invalid input" });
     }
   });
