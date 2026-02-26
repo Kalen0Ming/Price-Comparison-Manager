@@ -32,6 +32,8 @@ export const experiments = pgTable("experiments", {
   reviewRatio: integer("review_ratio").default(0).notNull(),
   status: text("status").notNull().default("draft"),
   templateId: integer("template_id"),
+  createdBy: integer("created_by"),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const taskBatches = pgTable("task_batches", {
@@ -150,6 +152,7 @@ export type AnnotationTemplate = typeof annotationTemplates.$inferSelect;
 export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 
 export type Experiment = typeof experiments.$inferSelect;
+export type ExperimentWithPublisher = Experiment & { publisherName: string | null };
 export type InsertExperiment = z.infer<typeof insertExperimentSchema>;
 
 export type TaskBatch = typeof taskBatches.$inferSelect;

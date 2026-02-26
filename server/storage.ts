@@ -3,7 +3,7 @@ import {
   users, annotationTemplates, experiments, taskBatches, tasks, annotations, notifications, logs, apiConnectors, systemSettings, userGroups, roleRequests,
   type User, type InsertUser, type UpdateUserRequest,
   type AnnotationTemplate, type InsertTemplate,
-  type Experiment, type InsertExperiment, type UpdateExperimentRequest,
+  type Experiment, type ExperimentWithPublisher, type InsertExperiment, type UpdateExperimentRequest,
   type TaskBatch, type InsertTaskBatch,
   type Task, type InsertTask,
   type Annotation, type InsertAnnotation,
@@ -34,10 +34,11 @@ export interface IStorage {
   deleteUser(id: number): Promise<void>;
 
   // Experiments
-  getExperiments(): Promise<Experiment[]>;
-  getExperiment(id: number): Promise<Experiment | undefined>;
+  getExperiments(): Promise<ExperimentWithPublisher[]>;
+  getExperiment(id: number): Promise<ExperimentWithPublisher | undefined>;
   createExperiment(exp: InsertExperiment): Promise<Experiment>;
   updateExperiment(id: number, updates: UpdateExperimentRequest): Promise<Experiment>;
+  softDeleteExperiment(id: number, deletedByUserId: number): Promise<void>;
   getExperimentStats(id: number): Promise<ExperimentStats>;
 
   // Tasks
@@ -134,13 +135,23 @@ export class DatabaseStorage implements IStorage {
     await db.delete(users).where(eq(users.id, id));
   }
 
-  async getExperiments(): Promise<Experiment[]> {
-    return await db.select().from(experiments);
+  async getExperiments(): Promise<ExperimentWithPublisher[]> {
+    const rows = await db
+      .select({ exp: experiments, publisherName: users.username })
+      .from(experiments)
+      .leftJoin(users, eq(experiments.createdBy, users.id))
+      .where(isNull(experiments.deletedAt));
+    return rows.map(r => ({ ...r.exp, publisherName: r.publisherName ?? null }));
   }
 
-  async getExperiment(id: number): Promise<Experiment | undefined> {
-    const [exp] = await db.select().from(experiments).where(eq(experiments.id, id));
-    return exp;
+  async getExperiment(id: number): Promise<ExperimentWithPublisher | undefined> {
+    const [row] = await db
+      .select({ exp: experiments, publisherName: users.username })
+      .from(experiments)
+      .leftJoin(users, eq(experiments.createdBy, users.id))
+      .where(and(eq(experiments.id, id), isNull(experiments.deletedAt)));
+    if (!row) return undefined;
+    return { ...row.exp, publisherName: row.publisherName ?? null };
   }
 
   async createExperiment(exp: InsertExperiment): Promise<Experiment> {
@@ -151,6 +162,15 @@ export class DatabaseStorage implements IStorage {
   async updateExperiment(id: number, updates: UpdateExperimentRequest): Promise<Experiment> {
     const [updated] = await db.update(experiments).set(updates).where(eq(experiments.id, id)).returning();
     return updated;
+  }
+
+  async softDeleteExperiment(id: number, deletedByUserId: number): Promise<void> {
+    await db.update(experiments).set({ deletedAt: new Date() }).where(eq(experiments.id, id));
+    await db.insert(logs).values({
+      userId: deletedByUserId,
+      action: "experiment_deleted",
+      details: `Soft-deleted experiment #${id}`,
+    });
   }
 
   async getExperimentStats(id: number): Promise<ExperimentStats> {

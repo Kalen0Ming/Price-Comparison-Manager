@@ -199,9 +199,9 @@ export async function registerRoutes(
         reviewRatio: z.coerce.number().min(0).max(100).optional().default(0),
         status: z.string().optional().default("draft"),
         templateId: z.coerce.number().optional().nullable(),
+        createdBy: z.coerce.number().optional().nullable(),
       });
       const input = schema.parse(req.body);
-      // Generate meaningful unique code: EXP-{YYYYMMDD}-{PRIORITY}-{6 random chars}
       const now = new Date();
       const ymd = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}`;
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -218,6 +218,14 @@ export async function registerRoutes(
 
   app.put(api.experiments.update.path, async (req, res) => {
     try {
+      const expId = Number(req.params.id);
+      const current = await storage.getExperiment(expId);
+      if (!current) return res.status(404).json({ message: "Not found" });
+      // Only allow editing draft experiments
+      const { role } = z.object({ role: z.string().optional() }).parse(req.body);
+      if (current.status !== "draft" && role !== "admin") {
+        return res.status(403).json({ message: "只能修改草稿状态的实验，已发布或归档的实验不可编辑。" });
+      }
       const schema = z.object({
         name: z.string().min(1).optional(),
         code: z.string().optional().nullable(),
@@ -228,9 +236,25 @@ export async function registerRoutes(
         reviewRatio: z.coerce.number().min(0).max(100).optional(),
         status: z.string().optional(),
         templateId: z.coerce.number().optional().nullable(),
+        role: z.string().optional(),
       });
       const input = schema.parse(req.body);
-      res.json(await storage.updateExperiment(Number(req.params.id), input as any));
+      const { role: _role, ...updateData } = input;
+      res.json(await storage.updateExperiment(expId, updateData as any));
+    } catch {
+      res.status(400).json({ message: "Invalid input" });
+    }
+  });
+
+  // Soft delete experiment (admin only)
+  app.delete("/api/experiments/:id", async (req, res) => {
+    try {
+      const expId = Number(req.params.id);
+      const { adminUserId } = z.object({ adminUserId: z.number() }).parse(req.body);
+      const exp = await storage.getExperiment(expId);
+      if (!exp) return res.status(404).json({ message: "Not found" });
+      await storage.softDeleteExperiment(expId, adminUserId);
+      res.json({ success: true });
     } catch {
       res.status(400).json({ message: "Invalid input" });
     }
