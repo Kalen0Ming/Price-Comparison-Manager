@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "th_z6iWfi6f9KH77sIINi"
+uri = "file://project-export.tar.gz"
+type = "unspecified"
+title = "数据标注实验平台 - Code Export"
